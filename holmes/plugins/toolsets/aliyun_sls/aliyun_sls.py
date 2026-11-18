@@ -124,7 +124,11 @@ def _serialize_log(log: Any) -> Dict[str, Any]:
     content = result.get("content") if isinstance(result, dict) else None
     if isinstance(content, str):
         try:
-            result["content_json"] = _redact(json.loads(content))
+            redacted_content = _redact(json.loads(content))
+            result["content_json"] = redacted_content
+            result["content"] = json.dumps(
+                redacted_content, separators=(",", ":"), ensure_ascii=False
+            )
         except (TypeError, ValueError):
             pass
     return result

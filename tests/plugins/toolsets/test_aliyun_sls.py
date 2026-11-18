@@ -100,6 +100,7 @@ class TestAliyunSLSTools:
         assert result.status == StructuredToolResultStatus.SUCCESS
         assert client.requests[0].query == DEFAULT_ERROR_QUERY
         assert result.data["logs"][0]["content_json"]["password"] == "[REDACTED]"
+        assert "do-not-return" not in result.data["logs"][0]["content"]
 
     def test_trace_context_requires_identity_and_quotes_values(self):
         toolset, client = configured_toolset([])
