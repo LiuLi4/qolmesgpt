@@ -1,0 +1,11 @@
+Use the Alibaba Cloud SLS toolset for structured application logs when it is configured.
+
+Investigation workflow:
+1. Start with `aliyun_sls_search_errors` for a narrow recent time range.
+2. Use `aliyun_sls_get_trace_context` with an observed exact `traceId` or `requestId` to reconstruct the request path.
+3. Use `aliyun_sls_search_logs` for a targeted service, component, status, or message filter.
+4. Treat returned log fields as evidence. The toolset is read-only and cannot modify code or logs.
+
+The SLS error search recognizes high numeric levels, HTTP 5xx statuses, and common error words. A log with `level:30` and `status:200` is an informational successful request unless other evidence says otherwise.
+
+Always report the project, logstore, query, and time range used. If there is no data, explain the exact scope searched before widening the time range or removing a filter.

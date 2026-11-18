@@ -43,6 +43,7 @@ HolmesGPT integrates with popular observability and cloud platforms. The followi
 | Data Source | Notes |
 |-------------|-------|
 | [<img src="images/integration_logos/aks-icon.png" alt="AKS" width="20" style="vertical-align: middle;"> **AKS**](https://holmesgpt.dev/data-sources/builtin-toolsets/aks/) | Azure Kubernetes Service cluster and node health diagnostics |
+| [☁️ **Alibaba Cloud SLS**](https://holmesgpt.dev/data-sources/builtin-toolsets/aliyun-sls/) | Search structured logs, error logs, and TraceId/RequestId context in Alibaba Cloud Log Service |
 | [<img src="images/integration_logos/jira-icon.png" alt="Atlassian Rovo" width="20" style="vertical-align: middle;"> **Atlassian Rovo**](https://holmesgpt.dev/data-sources/builtin-toolsets/atlassian-rovo-mcp/) | Jira issues and Confluence pages via Atlassian's hosted server (MCP) |
 | [<img src="images/integration_logos/argocd-icon.png" alt="ArgoCD" width="20" style="vertical-align: middle;"> **ArgoCD**](https://holmesgpt.dev/data-sources/builtin-toolsets/argocd/) | Get status, history and manifests and more of apps, projects and clusters |
 | [<img src="images/integration_logos/aws_logo.png" alt="AWS" width="20" style="vertical-align: middle;"> **AWS**](https://holmesgpt.dev/data-sources/builtin-toolsets/aws/) | Any AWS API via the hosted AWS MCP Server: RDS, EC2, CloudWatch, CloudTrail, Cost Explorer and more (MCP) |
