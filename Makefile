@@ -1,4 +1,4 @@
-.PHONY: docs spec-hook spec-execute
+.PHONY: docs
 
 check:
 	poetry run pre-commit run -a
@@ -18,9 +18,3 @@ docs-build:
 
 docs-strict:
 	poetry run mkdocs serve --dev-addr=127.0.0.1:7000 --strict
-
-spec-hook:
-	bunx specloop-cli hook
-
-spec-execute:
-	bunx specloop-cli execute --agent codex
