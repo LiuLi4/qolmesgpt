@@ -81,6 +81,19 @@ class TestAliyunSLSConfig:
         assert config.default_time_range_minutes == 15
         assert config.max_results == 100
 
+    def test_credentials_support_environment_templates(self, monkeypatch):
+        monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "env-id")
+        monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "env-secret")
+        config = AliyunSLSConfig(
+            endpoint="endpoint",
+            project="project",
+            logstore="logstore",
+            access_key_id="{{ env.ALIBABA_CLOUD_ACCESS_KEY_ID }}",
+            access_key_secret="{{ env.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}",
+        )
+        assert config.access_key_id == "env-id"
+        assert config.access_key_secret == "env-secret"
+
 
 class TestAliyunSLSTools:
     def test_search_errors_uses_server_side_error_filter(self):

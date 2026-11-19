@@ -24,6 +24,7 @@ from holmes.plugins.toolsets.utils import (
     standard_start_datetime_tool_param_description,
     toolset_name_for_one_liner,
 )
+from holmes.utils.header_rendering import render_env_template
 from holmes.utils.pydantic_utils import ToolsetConfig
 
 logger = logging.getLogger(__name__)
@@ -74,11 +75,18 @@ class AliyunSLSConfig(ToolsetConfig):
         if not isinstance(values, dict):
             return values
         values = dict(values)
-        values.setdefault("access_key_id", os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID"))
-        values.setdefault(
-            "access_key_secret", os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
-        )
-        values.setdefault("security_token", os.getenv("ALIBABA_CLOUD_SECURITY_TOKEN"))
+        for field, env_name in (
+            ("access_key_id", "ALIBABA_CLOUD_ACCESS_KEY_ID"),
+            ("access_key_secret", "ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
+            ("security_token", "ALIBABA_CLOUD_SECURITY_TOKEN"),
+        ):
+            configured = values.get(field)
+            if isinstance(configured, str):
+                values[field] = render_env_template(
+                    configured, f"AliyunSLSConfig.{field}"
+                )
+            if not values.get(field):
+                values[field] = os.getenv(env_name)
         return values
 
     @model_validator(mode="after")
