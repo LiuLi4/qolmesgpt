@@ -6,8 +6,8 @@
 -->
 
 **Feature ID**: `2026-1119-14537g`
-**Status**: Confirmed baseline with open design questions
-**Last Confirmed**: 2026-11-19 15:00 Asia/Shanghai
+**Status**: Confirmed baseline
+**Last Confirmed**: 2026-11-19 16:10 Asia/Shanghai
 
 ## Authority Rules
 
@@ -164,6 +164,62 @@
 - **Reason**: The user selected adapter default rules to keep the first release focused.
 - **User Evidence**: “适配器默认规则”。
 
+### DEC-007: GitLab Group as the permission boundary
+
+- **Status**: confirmed
+- **Decision**: Reuse the GitLab Group as the QolmesGPT project and membership boundary instead of adding a separate QolmesGPT organization or tenant layer in the first release.
+- **Alternatives Rejected**: A separate single-organization role model; a multi-tenant model.
+- **Reason**: The user selected GitLab Group as the existing project and member permission boundary.
+- **User Evidence**: “复用 GitLab Group 作为权限边界”。
+
+### DEC-008: PostgreSQL and Prisma deployment model
+
+- **Status**: confirmed
+- **Decision**: Use PostgreSQL with Prisma; use Docker PostgreSQL for development and a managed PostgreSQL service in production.
+- **Alternatives Rejected**: Drizzle; self-managed PostgreSQL in every environment; SQLite with later migration.
+- **Reason**: The user selected PostgreSQL + Prisma with managed production and Docker development environments.
+- **User Evidence**: “PostgreSQL + Prisma；生产托管、开发 Docker”。
+
+### DEC-009: SLS real-time consumption
+
+- **Status**: confirmed
+- **Decision**: Use Alibaba Cloud SLS real-time consumption for the first release, targeting second-level error discovery.
+- **Alternatives Rejected**: One-minute polling; five-minute polling.
+- **Reason**: The user selected real-time consumption for the 7×24 detection requirement.
+- **User Evidence**: “SLS 实时消费，目标秒级发现”。
+
+### DEC-010: One investigation task per error log
+
+- **Status**: confirmed
+- **Decision**: Create one independent investigation task for every log that matches the error rules; do not automatically aggregate repeated errors in the first release.
+- **Alternatives Rejected**: Project/data source/fingerprint aggregation within a 15-minute window; aggregation until manual closure.
+- **Reason**: The user selected one task per error.
+- **User Evidence**: “2”，对应“每条错误创建独立任务”。
+
+### DEC-011: Basic task card flow
+
+- **Status**: confirmed
+- **Decision**: Use the states `待调查 → 调查中 → 待审批 → 修复中 → 已验证 / 失败 / 已关闭`; assign fixed high priority; do not assign owners or integrate external notifications in the first release.
+- **Alternatives Rejected**: Owner and in-product notification support; external Feishu/Slack/Webhook notifications.
+- **Reason**: The user selected the basic task flow.
+- **User Evidence**: “基础任务流，固定高优先级，暂不分配负责人和外部通知”。
+
+### DEC-012: Single approval by eligible GitLab Group roles
+
+- **Status**: confirmed
+- **Decision**: A user with the GitLab Group `Developer`, `Maintainer`, or `Owner` role may provide the single approval required for code modification and MR creation.
+- **Alternatives Rejected**: Maintainer/Owner only; two-person approval; delegating all conditions to GitLab Approval Rules.
+- **Reason**: The user selected Developer, Maintainer, or Owner with one approval.
+- **User Evidence**: “Group Developer、Maintainer 或 Owner，单人审批即可”。
+
+### DEC-013: Dual repair verification
+
+- **Status**: confirmed
+- **Decision**: A repair is successful only when both the project's automated tests and an SLS re-query confirming the original error is gone have passed.
+- **Alternatives Rejected**: Project tests only; SLS re-query only; project-specific verification strategies in the first release.
+- **Reason**: The user selected both automated project tests and SLS error recheck.
+- **User Evidence**: “项目自动化测试和 SLS 错误复查都必须通过”。
+
 ## Out of Scope
 
 ### OUT-001: Complete Web configuration for non-SLS data sources
@@ -184,43 +240,50 @@
 
 ### OPEN-001: Detection transport, interval, and latency
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-009.
 - **Why It Matters**: Determines scheduler/consumer architecture, SLS query windows, cost, and the meaning of 7×24 detection.
 - **Owner**: User / Team
 
 ### OPEN-002: Error deduplication and aggregation
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-010.
 - **Why It Matters**: Determines whether repeated errors create one task or many tasks and defines the error fingerprint and task cardinality.
 - **Owner**: User / Team
 
 ### OPEN-003: Task card state, priority, ownership, and notifications
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-011.
 - **Why It Matters**: Determines the task-card schema, UI workflow, and notification integrations.
 - **Owner**: User / Team
 
 ### OPEN-004: Approval roles and quorum
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-012.
 - **Why It Matters**: Determines authorization checks and whether one or multiple approvals are required before code mutation and MR creation.
 - **Owner**: User / Team
 
 ### OPEN-005: Bug-fix verification contract
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-013.
 - **Why It Matters**: Determines whether verification requires project tests, a new SLS query showing the error is gone, or both.
 - **Owner**: User / Team
 
 ### OPEN-006: QolmesGPT user, organization, and role model
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-007.
 - **Why It Matters**: User-level GitLab connections and approvals require a product-level identity and authorization model.
 - **Owner**: User / Team
 
 ### OPEN-007: Database technology and deployment model
 
-- **Status**: open
+- **Status**: resolved
+- **Resolution**: Replaced by DEC-008.
 - **Why It Matters**: The requested implementation starts with database design, but the persistence technology and hosting model are not yet selected.
 - **Owner**: Team / Research
 
@@ -235,3 +298,9 @@
 - **Summary Presented**: Web UI-driven GitLab project workspaces, user-level GitLab OAuth/PAT connections, SLS-first data source configuration and verification, persistent project checkout, 7×24 detection, HolmesGPT investigation cards, human approval before code changes and MR creation, and TypeScript staged delivery.
 - **User Confirmation**: “确认，写入 requirements.md”。
 - **Entries Confirmed**: NEED-001, NEED-002, NEED-003, NEED-004, NEED-005, NEED-006, NEED-007, NEED-008, CON-001, CON-002, CON-003, CON-004, CON-005, DEC-001, DEC-002, DEC-003, DEC-004, DEC-005, DEC-006, OUT-001, OUT-002
+
+### Session 2026-11-19 16:10 Asia/Shanghai
+
+- **Summary Presented**: GitLab Group permission boundary, PostgreSQL + Prisma deployment, SLS real-time consumption, one task per error log, basic high-priority task flow, Developer/Maintainer/Owner single approval, and dual repair verification with project tests plus SLS re-query.
+- **User Confirmation**: “确认，将这 7 项写入 requirements.md 和 spec.md”。
+- **Entries Confirmed**: DEC-007, DEC-008, DEC-009, DEC-010, DEC-011, DEC-012, DEC-013
