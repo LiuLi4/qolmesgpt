@@ -170,6 +170,9 @@ evals_report.md
 
 config_toolsets.yaml
 
+# CodexSpec execution state is local observability data, not source.
+.specloop/
+
 **/.claude/settings.local.json
 .claude/settings.json
 .claude/skills/dev-skills/
