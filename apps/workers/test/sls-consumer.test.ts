@@ -75,7 +75,10 @@ test("ensures a group once, receives shard assignment, decodes logs and guards c
 
     if (url.pathname.endsWith("/consumergroups")) return response(JSON.stringify([{ consumerGroup: config.consumerGroup, timeout: 60, order: false }]));
     if (url.searchParams.get("type") === "heartbeat") return response("[3]");
-    if (url.searchParams.get("type") === "log") return response(logGroupListFixture(), { "content-type": "application/x-protobuf", "x-log-cursor": "cursor-next", "x-log-count": "1" });
+    if (url.searchParams.get("type") === "log") {
+      assert.equal(request.headers.get("accept-encoding"), "");
+      return response(logGroupListFixture(), { "content-type": "application/x-protobuf", "x-log-cursor": "cursor-next", "x-log-count": "1" });
+    }
     if (url.searchParams.get("type") === "checkpoint") return response("");
     return response("[]");
   };
@@ -119,4 +122,24 @@ test("creates a missing group and never force-updates a checkpoint", async () =>
   const checkpoint = calls.find((call) => call.path.includes("type=checkpoint"));
   assert.ok(checkpoint);
   assert.equal(new URLSearchParams(checkpoint.path.split("?")[1]).get("forceSuccess"), "false");
+});
+
+test("failed heartbeat revokes ownership until a successful retry", async () => {
+  let heartbeatCount = 0;
+  const fetcher: typeof fetch = async (input, init) => {
+    const request = new Request(input, init);
+    if (new URL(request.url).searchParams.get("type") === "heartbeat") {
+      heartbeatCount++;
+      if (heartbeatCount === 2) throw new Error("temporary network failure");
+      return response("[0]");
+    }
+    return response("");
+  };
+  const protocol = new AliyunSlsConsumerProtocol(config, fetcher);
+
+  assert.deepEqual(await protocol.heartbeat([]), [0]);
+  await assert.rejects(protocol.heartbeat([0]), /temporary network failure/);
+  await assert.rejects(protocol.updateCheckpoint(0, "cursor"), /does not own shard/);
+  assert.deepEqual(await protocol.heartbeat([]), [0]);
+  await protocol.updateCheckpoint(0, "cursor");
 });

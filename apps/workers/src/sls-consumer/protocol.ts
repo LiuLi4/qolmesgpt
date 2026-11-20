@@ -177,9 +177,14 @@ export class AliyunSlsConsumerProtocol {
   async heartbeat(ownedShards: readonly number[]): Promise<number[]> {
     if (ownedShards.some((shard) => !Number.isSafeInteger(shard) || shard < 0)) throw new Error("SLS shard IDs must be non-negative integers");
     const path = `/logstores/${encodeURIComponent(this.config.logstore)}/consumergroups/${encodeURIComponent(this.config.consumerGroup)}`;
-    const assignment = parseShardIds(await this.request("POST", path, { type: "heartbeat", consumer: this.config.consumerId }, [...ownedShards]));
-    this.assignments = new Set(assignment);
-    return assignment;
+    try {
+      const assignment = parseShardIds(await this.request("POST", path, { type: "heartbeat", consumer: this.config.consumerId }, [...ownedShards]));
+      this.assignments = new Set(assignment);
+      return assignment;
+    } catch (error) {
+      this.assignments.clear();
+      throw error;
+    }
   }
 
   async getCheckpoints(): Promise<SlsShardCheckpoint[]> {
@@ -249,7 +254,7 @@ export class AliyunSlsConsumerProtocol {
   }
 
   private async requestBinary(method: string, path: string, query: Readonly<Record<string, string>>): Promise<{ body: Uint8Array; headers: Headers }> {
-    const headers = { accept: "application/x-protobuf", "accept-encoding": "identity" };
+    const headers = { accept: "application/x-protobuf", "accept-encoding": "" };
     const response = await this.signedFetch(method, path, query, null, "", headers);
     return { body: new Uint8Array(await response.arrayBuffer()), headers: response.headers };
   }

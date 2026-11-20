@@ -111,13 +111,13 @@
   4. Normal level/status/message is not classified as error.
   5. Staging read uses the configured project/logstore and never prints credentials.
 
-#### T009 [BLOCKED] 验证 SLS Consumer Group 协议与 source position
+#### T009 [x] 验证 SLS Consumer Group 协议与 source position
 
 - **Outcome**: Produce a checked-in protocol probe/decision record proving group membership, shard assignment, checkpoint/ack, rebalance, retry and stable per-record source position, or record a blocking failure.
-- **Paths**: `apps/workers/src/sls-consumer/probe/`, `docs/decisions/sls-consumer-group.md`.
+- **Paths**: `apps/workers/src/sls-consumer/staging-probe.ts`, `apps/workers/src/sls-consumer/protocol.ts`, `docs/decisions/sls-consumer-group.md`.
 - **Dependencies**: T008.
 - **Covers**: REQ-016, REQ-032–REQ-033, NFR-006–NFR-007; **Plan**: Phase 4, PLD-003.
-- **Verification**: `apps/workers/src/sls-consumer/protocol.ts` and its transport-stub tests verify the Node.js request/signing boundary, group lifecycle, heartbeat assignment, PullLogs Protobuf decoding, stable source positions, and checkpoint ownership. The task remains blocked until a live staging probe verifies assignment/rebalance, checkpoint recovery, retry, and source positions against `pyxis-telemetry-log/pyxis-trace-staging`; no polling fallback is accepted.
+- **Verification**: Transport-stub tests and the live staging probe verify the Node.js request/signing boundary, group lifecycle, heartbeat assignment, PullLogs Protobuf decoding, stable source positions, checkpoint recovery, revoked ownership protection, and disjoint rebalance assignments against `pyxis-telemetry-log/pyxis-trace-staging`; no polling fallback is accepted.
 - **Test Scenarios**:
   1. Consumer can join a group and receive shard assignment.
   2. Ack/checkpoint resumes after restart from the last committed position.
