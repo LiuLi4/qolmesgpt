@@ -16,7 +16,7 @@
 - **Covers**: REQ-027, REQ-028; **Plan**: Phase 1, PLD-001.
 - **Verification**: workspace installs cleanly; scripts resolve without modifying Python project behavior.
 
-#### T002 实现 Prisma schema、迁移与本地 PostgreSQL
+#### T002 [x] 实现 Prisma schema、迁移与本地 PostgreSQL
 
 - **Outcome**: 建立设计中的实体、关系、索引、唯一约束、timestamptz 和 outbox 表；提供 Docker PostgreSQL 开发启动配置。
 - **Paths**: `apps/control-plane/prisma/schema.prisma`, `apps/control-plane/prisma/migrations/`, `docker-compose.yml`, `apps/control-plane/src/db/`.

@@ -182,3 +182,4 @@ uv.lock
 node_modules/
 dist/
 *.tsbuildinfo
+apps/control-plane/src/generated/

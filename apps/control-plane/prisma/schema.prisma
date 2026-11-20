@@ -1,0 +1,322 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ConnectionAuthType {
+  OAUTH
+  PAT
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  INVALID
+  REVOKED
+}
+
+enum WorkspaceStatus {
+  INITIALIZING
+  READY
+  OCCUPIED
+  DIRTY
+  FAILED
+}
+
+enum DataSourceType {
+  ALIYUN_SLS
+}
+
+enum DataSourceStatus {
+  CONFIGURED
+  VERIFIED
+  ENABLED
+  PAUSED
+  FAILED
+}
+
+enum VerificationKind {
+  CONNECTION
+  READ
+}
+
+enum VerificationStatus {
+  PASSED
+  FAILED
+}
+
+enum ConsumerStatus {
+  STARTING
+  RUNNING
+  DEGRADED
+  STOPPED
+  FAILED
+}
+
+enum InvestigationTaskStatus {
+  INVESTIGATION_PENDING
+  INVESTIGATING
+  AWAITING_APPROVAL
+  REPAIRING
+  VERIFIED
+  FAILED
+  CLOSED
+}
+
+enum TaskPriority {
+  HIGH
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+enum GitLabGroupRole {
+  GUEST
+  REPORTER
+  DEVELOPER
+  MAINTAINER
+  OWNER
+  UNKNOWN
+}
+
+enum RepairRunStatus {
+  PENDING
+  RUNNING
+  TESTS_PASSED
+  SLS_RECHECK_PASSED
+  VERIFIED
+  FAILED
+}
+
+enum MergeRequestStatus {
+  PENDING
+  CREATED
+  FAILED
+}
+
+model User {
+  id                String             @id @default(uuid()) @db.Uuid
+  authSubject       String             @unique
+  createdAt         DateTime           @default(now()) @db.Timestamptz(6)
+  gitLabConnections GitLabConnection[]
+  createdProjects   Project[]          @relation("ProjectCreator")
+  approvals         Approval[]
+}
+
+model GitLabConnection {
+  id                     String             @id @default(uuid()) @db.Uuid
+  userId                 String             @db.Uuid
+  instanceUrl            String
+  authType               ConnectionAuthType
+  accessTokenCiphertext  String
+  refreshTokenCiphertext String?
+  credentialKeyVersion   String
+  expiresAt              DateTime?          @db.Timestamptz(6)
+  status                 ConnectionStatus   @default(ACTIVE)
+  createdAt              DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @db.Timestamptz(6)
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groups                 GitLabGroup[]
+  projects               Project[]
+
+  @@unique([userId, instanceUrl])
+  @@index([userId, status])
+}
+
+model GitLabGroup {
+  id              String           @id @default(uuid()) @db.Uuid
+  connectionId    String           @db.Uuid
+  externalGroupId String
+  fullPath        String
+  roleSnapshot    GitLabGroupRole  @default(UNKNOWN)
+  roleSyncedAt    DateTime?        @db.Timestamptz(6)
+  connection      GitLabConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  projects        Project[]
+
+  @@unique([connectionId, externalGroupId])
+  @@index([connectionId, fullPath])
+}
+
+model Project {
+  id                String                 @id @default(uuid()) @db.Uuid
+  connectionId      String                 @db.Uuid
+  groupId           String                 @db.Uuid
+  externalProjectId String
+  pathWithNamespace String
+  defaultBranch     String
+  createdByUserId   String                 @db.Uuid
+  createdAt         DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime               @updatedAt @db.Timestamptz(6)
+  connection        GitLabConnection       @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  group             GitLabGroup            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy         User                   @relation("ProjectCreator", fields: [createdByUserId], references: [id])
+  workspace         ProjectWorkspace?
+  dataSources       DataSourceConnection[]
+  tasks             InvestigationTask[]
+
+  @@unique([connectionId, externalProjectId])
+  @@index([groupId, pathWithNamespace])
+}
+
+model ProjectWorkspace {
+  id            String          @id @default(uuid()) @db.Uuid
+  projectId     String          @unique @db.Uuid
+  relativePath  String
+  headSha       String?
+  branch        String?
+  status        WorkspaceStatus @default(INITIALIZING)
+  lockOwner     String?
+  lockExpiresAt DateTime?       @db.Timestamptz(6)
+  fencingToken  BigInt          @default(0)
+  createdAt     DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime        @updatedAt @db.Timestamptz(6)
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repairRuns    RepairRun[]
+}
+
+model DataSourceConnection {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  projectId             String                   @db.Uuid
+  type                  DataSourceType
+  configJson            Json
+  credentialsCiphertext String
+  credentialKeyVersion  String
+  status                DataSourceStatus         @default(CONFIGURED)
+  enabledAt             DateTime?                @db.Timestamptz(6)
+  createdAt             DateTime                 @default(now()) @db.Timestamptz(6)
+  updatedAt             DateTime                 @updatedAt @db.Timestamptz(6)
+  project               Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  verifications         DataSourceVerification[]
+  consumerState         SLSConsumerState?
+  errorEvents           ErrorEvent[]
+
+  @@unique([projectId, type])
+  @@index([projectId, status])
+}
+
+model DataSourceVerification {
+  id           String               @id @default(uuid()) @db.Uuid
+  connectionId String               @db.Uuid
+  kind         VerificationKind
+  status       VerificationStatus
+  testedAt     DateTime             @default(now()) @db.Timestamptz(6)
+  safeSummary  Json?
+  errorCode    String?
+  connection   DataSourceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, kind, testedAt])
+}
+
+model SLSConsumerState {
+  id                String               @id @default(uuid()) @db.Uuid
+  connectionId      String               @unique @db.Uuid
+  consumerGroup     String
+  workerId          String?
+  shardAssignments  Json?
+  checkpointSummary Json?
+  status            ConsumerStatus       @default(STOPPED)
+  lastHeartbeatAt   DateTime?            @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @db.Timestamptz(6)
+  connection        DataSourceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+}
+
+model ErrorEvent {
+  id                     String               @id @default(uuid()) @db.Uuid
+  dataSourceConnectionId String               @db.Uuid
+  sourcePositionKey      String
+  sourceTimestamp        DateTime             @db.Timestamptz(6)
+  logEvidenceJson        Json
+  fingerprint            String
+  createdAt              DateTime             @default(now()) @db.Timestamptz(6)
+  dataSourceConnection   DataSourceConnection @relation(fields: [dataSourceConnectionId], references: [id], onDelete: Cascade)
+  investigationTask      InvestigationTask?
+
+  @@unique([dataSourceConnectionId, sourcePositionKey])
+  @@index([dataSourceConnectionId, sourceTimestamp])
+  @@index([fingerprint])
+}
+
+model InvestigationTask {
+  id                      String                  @id @default(uuid()) @db.Uuid
+  projectId               String                  @db.Uuid
+  errorEventId            String                  @unique @db.Uuid
+  status                  InvestigationTaskStatus @default(INVESTIGATION_PENDING)
+  priority                TaskPriority            @default(HIGH)
+  investigationResultJson Json?
+  createdAt               DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime                @updatedAt @db.Timestamptz(6)
+  project                 Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  errorEvent              ErrorEvent              @relation(fields: [errorEventId], references: [id], onDelete: Cascade)
+  approvals               Approval[]
+  repairRuns              RepairRun[]
+  outboxMessages          OutboxMessage[]
+
+  @@index([projectId, status, createdAt])
+}
+
+model Approval {
+  id                   String            @id @default(uuid()) @db.Uuid
+  taskId               String            @db.Uuid
+  approverUserId       String            @db.Uuid
+  groupRoleAtApproval  GitLabGroupRole
+  decision             ApprovalDecision
+  approvedAt           DateTime          @default(now()) @db.Timestamptz(6)
+  roleCheckedAt        DateTime          @db.Timestamptz(6)
+  authorizationVersion Int               @default(1)
+  task                 InvestigationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  approver             User              @relation(fields: [approverUserId], references: [id])
+
+  @@index([taskId, decision, approvedAt])
+}
+
+model RepairRun {
+  id               String            @id @default(uuid()) @db.Uuid
+  taskId           String            @db.Uuid
+  workspaceId      String            @db.Uuid
+  branch           String
+  status           RepairRunStatus   @default(PENDING)
+  testResult       Json?
+  slsRecheckResult Json?
+  fencingToken     BigInt
+  idempotencyKey   String            @unique
+  startedAt        DateTime?         @db.Timestamptz(6)
+  finishedAt       DateTime?         @db.Timestamptz(6)
+  task             InvestigationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  workspace        ProjectWorkspace  @relation(fields: [workspaceId], references: [id])
+  mergeRequest     MergeRequest?
+
+  @@index([taskId, status])
+}
+
+model MergeRequest {
+  id           String             @id @default(uuid()) @db.Uuid
+  repairRunId  String             @unique @db.Uuid
+  externalMrId String?
+  url          String?
+  status       MergeRequestStatus @default(PENDING)
+  createdAt    DateTime           @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @db.Timestamptz(6)
+  repairRun    RepairRun          @relation(fields: [repairRunId], references: [id], onDelete: Cascade)
+}
+
+model OutboxMessage {
+  id            String             @id @default(uuid()) @db.Uuid
+  aggregateType String
+  aggregateId   String             @db.Uuid
+  eventType     String
+  payload       Json
+  availableAt   DateTime           @default(now()) @db.Timestamptz(6)
+  claimedAt     DateTime?          @db.Timestamptz(6)
+  claimOwner    String?
+  attempts      Int                @default(0)
+  createdAt     DateTime           @default(now()) @db.Timestamptz(6)
+  task          InvestigationTask? @relation(fields: [aggregateId], references: [id], onDelete: Cascade)
+
+  @@index([availableAt, claimedAt])
+  @@index([aggregateType, aggregateId])
+}
