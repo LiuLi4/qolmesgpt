@@ -29,7 +29,7 @@
   3. Duplicate `(dataSourceConnectionId, sourcePositionKey)` and duplicate `errorEventId` are rejected.
   4. Transaction rollback leaves no ErrorEvent, task, or outbox row.
 
-#### T003 实现领域状态机、DTO、错误码与脱敏序列化
+#### T003 [x] 实现领域状态机、DTO、错误码与脱敏序列化
 
 - **Outcome**: 实现任务状态、审批状态、修复状态、固定 high priority、标准错误响应和禁止返回 secrets/绝对路径的 DTO。
 - **Paths**: `packages/contracts/src/domain.ts`, `packages/contracts/src/errors.ts`, `packages/contracts/src/dto.ts`, `apps/control-plane/src/domain/`.
@@ -42,7 +42,7 @@
   3. Investigation/repair failure preserves source evidence and enters FAILED.
   4. Serialized responses omit credential plaintext, authorization headers, and absolute workspace paths.
 
-#### T004 实现加密、密钥版本与敏感字段防泄露
+#### T004 [x] 实现加密、密钥版本与敏感字段防泄露
 
 - **Outcome**: 提供 envelope encryption adapter、key version metadata、development secret injection and redaction utilities。
 - **Paths**: `packages/security/src/encryption.ts`, `packages/security/src/redaction.ts`, `apps/control-plane/src/security/`.

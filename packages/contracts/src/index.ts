@@ -13,3 +13,7 @@ export const aliyunSlsAdapter: DataSourceAdapterDescriptor = {
   displayName: "Alibaba Cloud SLS",
   capabilities: ["bounded-read", "error-classification"],
 };
+
+export * from "./domain.js";
+export * from "./dto.js";
+export * from "./errors.js";
