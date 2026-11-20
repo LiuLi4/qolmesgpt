@@ -117,7 +117,7 @@
 - **Paths**: `apps/workers/src/sls-consumer/probe/`, `docs/decisions/sls-consumer-group.md`.
 - **Dependencies**: T008.
 - **Covers**: REQ-016, REQ-032–REQ-033, NFR-006–NFR-007; **Plan**: Phase 4, PLD-003.
-- **Verification**: blocked by the checked-in protocol decision. The reviewed official `@alicloud/log@1.2.6` client has no Consumer Group membership, shard assignment, checkpoint/ack, rebalance, retry, or stable per-record source-position API. No polling fallback is accepted.
+- **Verification**: blocked by the checked-in protocol decision. The official `@alicloud/sls20201230@5.12.0` provides generated Consumer Group control APIs, but PullLogs is documented as unsupported by its OpenAPI SDK and does not provide usable Protobuf decoding. No polling fallback is accepted.
 - **Test Scenarios**:
   1. Consumer can join a group and receive shard assignment.
   2. Ack/checkpoint resumes after restart from the last committed position.
