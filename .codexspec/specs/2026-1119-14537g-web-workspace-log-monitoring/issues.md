@@ -1,8 +1,8 @@
 # Implementation Issues
 
-## SLS Consumer Group protocol is not available in the maintained Node SDK
+## Issue: SLS Consumer Group protocol is not available in the reviewed TypeScript client
 
-- **Task**: T009 [BLOCKING]
-- **Error**: `@alicloud/log@1.2.6` has no Consumer Group membership, shard assignment, checkpoint/ack, rebalance, or stable source-position API.
-- **Attempted**: Inspected the official MIT package and searched npm/GitHub for a maintained TypeScript implementation with the required semantics.
-- **Status**: Blocked pending a supported protocol/client. Polling is not an accepted workaround under REQ-016 and NFR-006/NFR-007.
+- **Task**: T009
+- **Error**: The official `@alicloud/log@1.2.6` client exposes bounded log APIs but no Consumer Group membership, shard assignment, checkpoint/ack, rebalance, retry, or stable per-record source-position API.
+- **Attempted**: Inspected the published MIT package and its client surface; checked the repository's existing protocol decision record. The required real-time semantics cannot be demonstrated with this client.
+- **Status**: Blocked. T010 and later detection/repair stages must not substitute periodic polling. Resume when a supported client or verified protocol implementation is selected and passes the required probe.

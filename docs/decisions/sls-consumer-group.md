@@ -2,6 +2,8 @@
 
 **Status**: BLOCKED pending a supported real-time client or verified protocol implementation.
 
+**Checked**: 2026-11-20 against `@alicloud/log@1.2.6` (MIT).
+
 ## Evidence
 
 - The official Node.js package `@alicloud/log@1.2.6` is published under the MIT license and points to `aliyun/aliyun-log-nodejs-sdk`.

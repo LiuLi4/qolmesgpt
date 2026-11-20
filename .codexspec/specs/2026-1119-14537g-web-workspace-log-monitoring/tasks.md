@@ -111,13 +111,13 @@
   4. Normal level/status/message is not classified as error.
   5. Staging read uses the configured project/logstore and never prints credentials.
 
-#### T009 [BLOCKING] 验证 SLS Consumer Group 协议与 source position
+#### T009 [BLOCKED] 验证 SLS Consumer Group 协议与 source position
 
 - **Outcome**: Produce a checked-in protocol probe/decision record proving group membership, shard assignment, checkpoint/ack, rebalance, retry and stable per-record source position, or record a blocking failure.
 - **Paths**: `apps/workers/src/sls-consumer/probe/`, `docs/decisions/sls-consumer-group.md`.
 - **Dependencies**: T008.
 - **Covers**: REQ-016, REQ-032–REQ-033, NFR-006–NFR-007; **Plan**: Phase 4, PLD-003.
-- **Verification**: probe runs against supported test endpoint/fixture; no polling implementation is accepted as a pass.
+- **Verification**: blocked by the checked-in protocol decision. The reviewed official `@alicloud/log@1.2.6` client has no Consumer Group membership, shard assignment, checkpoint/ack, rebalance, retry, or stable per-record source-position API. No polling fallback is accepted.
 - **Test Scenarios**:
   1. Consumer can join a group and receive shard assignment.
   2. Ack/checkpoint resumes after restart from the last committed position.
