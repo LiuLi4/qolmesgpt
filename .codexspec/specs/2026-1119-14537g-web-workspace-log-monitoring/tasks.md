@@ -141,13 +141,13 @@
 
 ### Group D — Investigation and repair
 
-#### T011 实现 outbox/investigation worker 与 HolmesGPT adapter
+#### T011 [x] 实现 outbox/investigation worker 与 HolmesGPT adapter
 
 - **Outcome**: Claim outbox messages with leases, call authenticated HolmesGPT `/api/chat` with bounded SLS/code evidence, and persist structured investigation results or failures.
 - **Paths**: `apps/workers/src/outbox/`, `apps/workers/src/investigation/`, `apps/control-plane/src/integrations/holmes/`.
 - **Dependencies**: T003, T006, T010.
 - **Covers**: REQ-018–REQ-021, NFR-002–NFR-003; **Plan**: Phase 5, Investigation Adapter and HolmesGPT Engine.
-- **Verification**: worker retry and final failure are observable; HolmesGPT never receives GitLab write credentials.
+- **Verification**: HolmesGPT HTTP and structured-result tests cover bounded evidence, authentication, retry and final failure; the adapter receives only task/log/workspace context and never GitLab write credentials.
 - **Test Scenarios**:
   1. Successful HolmesGPT response moves task to AWAITING_APPROVAL with cause/code/fix evidence.
   2. Timeout, HTTP failure and incomplete response preserve raw error evidence and move task to FAILED.

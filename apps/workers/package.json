@@ -8,6 +8,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/sls-consumer/main.js",
+    "start:investigation": "node dist/investigation/main.js",
     "test": "pnpm build && node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
