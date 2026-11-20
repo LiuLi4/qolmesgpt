@@ -56,13 +56,13 @@
 
 ### Group B — GitLab and workspace
 
-#### T005 实现 GitLab OAuth/PAT connector 与 Group/project 查询
+#### T005 [x] 实现 GitLab OAuth/PAT connector 与 Group/project 查询
 
 - **Outcome**: 完成 OAuth state/PKCE callback、PAT validation、用户连接持久化、分页 Group/project 查询和 live membership role lookup。
 - **Paths**: `apps/control-plane/src/integrations/gitlab/`, `apps/control-plane/src/routes/gitlab.ts`.
 - **Dependencies**: T002–T004.
 - **Covers**: REQ-002–REQ-006, REQ-030, REQ-035, NFR-002; **Plan**: Phase 2, Identity and GitLab Connector.
-- **Verification**: connector uses authenticated server-side tokens only and returns safe summaries.
+- **Verification**: connector uses authenticated server-side tokens only and returns safe summaries. `pnpm typecheck`, `pnpm build`, `pnpm test`, and Prisma schema validation pass; OAuth/PAT regression tests cover one-time state, expiration/denial, connection preservation, permission-scoped project listing, and approval roles.
 - **Test Scenarios**:
   1. OAuth callback with valid state/code creates encrypted connection.
   2. Invalid/expired state, denied callback, expired PAT and insufficient scope do not replace an existing connection.
