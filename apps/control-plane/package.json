@@ -13,6 +13,7 @@
     "db:format": "prisma format --schema prisma/schema.prisma"
   },
   "dependencies": {
+    "@alicloud/log": "1.2.6",
     "@gitbeaker/rest": "43.8.0",
     "@prisma/client": "^7.10.1",
     "@qolmesgpt/contracts": "workspace:*",

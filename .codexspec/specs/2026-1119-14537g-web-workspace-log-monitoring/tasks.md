@@ -84,26 +84,26 @@
 
 ### Group C — SLS configuration and detection
 
-#### T007 实现通用 DataSourceAdapter 与 Alibaba SLS 配置 API
+#### T007 [x] 实现通用 DataSourceAdapter 与 Alibaba SLS 配置 API
 
 - **Outcome**: 定义 adapter contract，实现 `aliyun-sls` config validation、connection/read test routes、safe verification records and enable gate。
 - **Paths**: `packages/contracts/src/data-source.ts`, `apps/control-plane/src/integrations/sls/`, `apps/control-plane/src/routes/data-sources.ts`.
 - **Dependencies**: T002–T004.
 - **Covers**: REQ-010–REQ-015, NFR-003–NFR-004; **Plan**: Phase 3, SLS Data Source Adapter.
-- **Verification**: only a connection with both recent successful tests can be enabled.
+- **Verification**: generic adapter contracts, normalized SLS config routes, encrypted Prisma writer, verification records, and the two-pass enablement gate are implemented and covered by TypeScript tests.
 - **Test Scenarios**:
   1. Valid SLS Project/Logstore/Endpoint and credentials are stored encrypted.
   2. Invalid endpoint, unauthorized credentials, missing project/logstore and malformed config return distinct failures.
   3. Successful bounded read with zero matches is distinct from API failure.
   4. Enable is rejected until both connection and read verification succeed.
 
-#### T008 实现 SLS 读取、错误规则与 staging smoke adapter
+#### T008 [x] 实现 SLS 读取、错误规则与 staging smoke adapter
 
 - **Outcome**: 实现 bounded log read/search、structured error results and default error classifier; provide staging configuration path for `cn-shanghai / pyxis-telemetry-log / pyxis-trace-staging` without committed secrets.
 - **Paths**: `apps/control-plane/src/integrations/sls/client.ts`, `apps/control-plane/src/integrations/sls/classifier.ts`, `apps/control-plane/test/sls/`.
 - **Dependencies**: T007.
 - **Covers**: REQ-013–REQ-017, REQ-032, NFR-003; **Plan**: Phase 3, PLD-004.
-- **Verification**: mock tests pass; staging smoke is safe-summary only and skipped without credentials.
+- **Verification**: bounded read, distinct no-data/API failure results, default error classifier, staging project/logstore defaults, and secret-free safe summaries are covered by mock tests. Live staging smoke remains an environment-dependent follow-up and is not run without credentials.
 - **Test Scenarios**:
   1. `level >= 50` classifies as error.
   2. `status >= 500` classifies as error.

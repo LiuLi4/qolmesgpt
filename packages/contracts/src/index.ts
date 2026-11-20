@@ -17,3 +17,4 @@ export const aliyunSlsAdapter: DataSourceAdapterDescriptor = {
 export * from "./domain.js";
 export * from "./dto.js";
 export * from "./errors.js";
+export * from "./data-source.js";
