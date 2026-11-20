@@ -176,3 +176,9 @@ config_toolsets.yaml
 .claude-trace/
 eval_results.json
 uv.lock
+
+# TypeScript workspace outputs
+.pnpm-store/
+node_modules/
+dist/
+*.tsbuildinfo

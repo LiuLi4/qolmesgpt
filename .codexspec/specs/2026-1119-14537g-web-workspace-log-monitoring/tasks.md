@@ -8,7 +8,7 @@
 
 ### Group A — TypeScript foundation and persistence
 
-#### T001 [P] 建立 TypeScript workspace 与质量检查入口
+#### T001 [P] [x] 建立 TypeScript workspace 与质量检查入口
 
 - **Outcome**: 创建 `apps/control-plane`、`apps/web`、`apps/workers`、`packages/contracts`、`packages/security` 的 workspace 配置；提供 build、lint、typecheck 和 test scripts。
 - **Paths**: `package.json`, `pnpm-workspace.yaml` (or selected package-manager equivalent), `tsconfig.base.json`, `apps/*/package.json`, `packages/*/package.json`.
