@@ -69,13 +69,13 @@
   3. Project listing excludes projects not visible to the current connection.
   4. Membership roles Developer/Maintainer/Owner pass approval eligibility; other roles fail.
 
-#### T006 实现项目 checkout workspace、锁和 fencing token
+#### T006 [x] 实现项目 checkout workspace、锁和 fencing token
 
 - **Outcome**: 创建持久化项目 checkout、同步和 branch 管理；拒绝路径逃逸、脏 workspace 和失效 lock owner 写入。
 - **Paths**: `apps/control-plane/src/workspace/`, `apps/workers/src/workspace/`.
 - **Dependencies**: T005.
 - **Covers**: REQ-006–REQ-009, REQ-024, NFR-002, NFR-005; **Plan**: Phase 2, Project Workspace Manager.
-- **Verification**: checkout path is derived only from internal project ID; lock state is observable.
+- **Verification**: checkout path is containment-checked and rejects traversal/symlinks; workspace initialization reuses one checkout only after remote identity verification; dirty sync is blocked; lease locks and fencing tokens reject concurrent or expired owners. Control-plane workspace tests pass.
 - **Test Scenarios**:
   1. New project creates/reuses one persistent checkout and reports SHA/status.
   2. Symlink/path traversal and mismatched remote project are rejected.
