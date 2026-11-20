@@ -50,6 +50,9 @@ importers:
       '@qolmesgpt/control-plane':
         specifier: workspace:*
         version: link:../control-plane
+      '@qolmesgpt/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       protobufjs:
         specifier: 6.11.6
         version: 6.11.6

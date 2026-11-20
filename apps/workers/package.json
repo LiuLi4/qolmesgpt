@@ -9,11 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/sls-consumer/main.js",
     "start:investigation": "node dist/investigation/main.js",
+    "start:repair": "node dist/repair/main.js",
     "test": "pnpm build && node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@qolmesgpt/contracts": "workspace:*",
     "@qolmesgpt/control-plane": "workspace:*",
+    "@qolmesgpt/security": "workspace:*",
     "protobufjs": "6.11.6"
   }
 }

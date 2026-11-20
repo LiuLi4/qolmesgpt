@@ -154,13 +154,13 @@
   3. Worker restart reclaims expired lease without duplicate investigation result.
   4. Evidence is bounded and contains no credentials or unrestricted repository dump.
 
-#### T012 实现审批 API 与 Repair Worker
+#### T012 [x] 实现审批 API 与 Repair Worker
 
 - **Outcome**: Enforce live Group role and one-person approval; run approved repair under workspace fencing lock with restricted command execution and auditable RepairRun.
 - **Paths**: `apps/control-plane/src/routes/approvals.ts`, `apps/workers/src/repair/`, `packages/security/src/execution.ts`.
 - **Dependencies**: T005, T006, T011.
 - **Covers**: REQ-021–REQ-025, REQ-035, NFR-001–NFR-002, NFR-005; **Plan**: Phase 6, Approval and Repair Worker.
-- **Verification**: no code/test/MR side effect occurs without valid approval and lock.
+- **Verification**: approval, single-decision, role recheck, `RepairRequested` outbox dispatch/retry, nsjail fail-closed execution, command output bounds, workspace fencing and repair state tests pass. MR creation remains T013.
 - **Test Scenarios**:
   1. Eligible live Group role approves once and starts a RepairRun.
   2. Non-member/Reporter/Guest, rejected approval, revoked approval or unavailable GitLab role check cannot start repair.

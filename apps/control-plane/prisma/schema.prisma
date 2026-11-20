@@ -288,6 +288,7 @@ model Approval {
   approver             User              @relation(fields: [approverUserId], references: [id])
 
   @@index([taskId, decision, approvedAt])
+  @@unique([taskId])
 }
 
 model RepairRun {
