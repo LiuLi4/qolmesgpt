@@ -44,6 +44,9 @@ importers:
       '@qolmesgpt/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      protobufjs:
+        specifier: 6.11.6
+        version: 6.11.6
 
   packages/contracts: {}
 
