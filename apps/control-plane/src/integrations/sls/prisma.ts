@@ -32,7 +32,24 @@ export class PrismaSlsDataSourceWriter {
 }
 
 export class PrismaSlsVerificationStore {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaClient, private readonly cipher: SecretCipher) {}
+
+  async matchesConfig(connectionId: string, config: SlsConfig): Promise<boolean> {
+    const saved = await this.prisma.dataSourceConnection.findUnique({
+      where: { id: connectionId },
+      select: { type: true, configJson: true, credentialsCiphertext: true },
+    });
+    if (!saved || saved.type !== "ALIYUN_SLS") return false;
+    try {
+      const settings = saved.configJson as Record<string, unknown>;
+      const credentials = JSON.parse(this.cipher.decrypt(saved.credentialsCiphertext)) as Record<string, unknown>;
+      return settings.endpoint === config.endpoint && settings.project === config.project && settings.logstore === config.logstore
+        && credentials.accessKeyId === config.accessKeyId && credentials.accessKeySecret === config.accessKeySecret
+        && (credentials.securityToken ?? undefined) === (config.securityToken ?? undefined);
+    } catch {
+      return false;
+    }
+  }
 
   async recordConnection(connectionId: string, result: DataSourceConnectionTestResult): Promise<void> {
     await this.prisma.dataSourceVerification.create({
@@ -47,15 +64,23 @@ export class PrismaSlsVerificationStore {
   }
 
   async canEnable(connectionId: string): Promise<boolean> {
-    const [connection, read] = await Promise.all([
-      this.prisma.dataSourceVerification.findFirst({ where: { connectionId, kind: "CONNECTION", status: "PASSED" }, orderBy: { testedAt: "desc" } }),
-      this.prisma.dataSourceVerification.findFirst({ where: { connectionId, kind: "READ", status: "PASSED" }, orderBy: { testedAt: "desc" } }),
+    const [source, connection, read] = await Promise.all([
+      this.prisma.dataSourceConnection.findUnique({ where: { id: connectionId }, select: { updatedAt: true } }),
+      this.prisma.dataSourceVerification.findFirst({ where: { connectionId, kind: "CONNECTION" }, orderBy: { testedAt: "desc" } }),
+      this.prisma.dataSourceVerification.findFirst({ where: { connectionId, kind: "READ" }, orderBy: { testedAt: "desc" } }),
     ]);
-    return Boolean(connection && read);
+    return Boolean(source && connection?.status === "PASSED" && read?.status === "PASSED"
+      && connection.testedAt >= source.updatedAt && read.testedAt >= source.updatedAt);
   }
 
   async enable(connectionId: string): Promise<{ status: "ENABLED" }> {
-    await this.prisma.dataSourceConnection.update({ where: { id: connectionId }, data: { status: "ENABLED", enabledAt: new Date() } });
+    const source = await this.prisma.dataSourceConnection.findUnique({ where: { id: connectionId }, select: { updatedAt: true } });
+    if (!source || !(await this.canEnable(connectionId))) throw new Error("SLS connection and read verification must both pass before enabling");
+    const updated = await this.prisma.dataSourceConnection.updateMany({
+      where: { id: connectionId, updatedAt: source.updatedAt },
+      data: { status: "ENABLED", enabledAt: new Date() },
+    });
+    if (updated.count !== 1) throw new Error("SLS configuration changed during enablement");
     return { status: "ENABLED" };
   }
 }

@@ -125,13 +125,13 @@
   4. Duplicate delivery yields the same stable source position key.
   5. Missing stable position or unsupported protocol fails the gate explicitly.
 
-#### T010 实现 SLS consumer worker 与检测事务
+#### T010 [x] 实现 SLS consumer worker 与检测事务
 
 - **Outcome**: Implement enabled-connection consumer, health/lag state, reconnect/recovery, classifier dispatch and transactional ErrorEvent/task/outbox creation; commit checkpoint only after persistence succeeds.
 - **Paths**: `apps/workers/src/sls-consumer/`, `apps/workers/src/detection/`, `apps/control-plane/src/detection/`.
 - **Dependencies**: T002–T004, T008, T009.
 - **Covers**: REQ-016–REQ-018, REQ-032–REQ-034, NFR-006–NFR-007; **Plan**: Phase 4, SLS Consumer Service and Detection Pipeline.
-- **Verification**: lag and reconnect state are observable; every matching log gets one task.
+- **Verification**: Worker unit tests cover checkpoint ordering, source recovery and transient PullLogs retry. PostgreSQL integration tests cover per-position idempotency, independent same-fingerprint cards, non-error filtering, outbox creation, and transaction rollback. `SLSConsumerState` exposes assignments, heartbeat, lagging flag, and last checkpoint. Live staging card creation remains a T016 end-to-end check once a project connection is enabled.
 - **Test Scenarios**:
   1. Enabled verified source consumes an error and creates exactly one event/task/outbox row.
   2. Non-error log advances checkpoint without creating a task.

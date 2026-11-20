@@ -36,9 +36,10 @@ function recordsFromResponse(value: unknown): SlsLogRecord[] {
 
 function safeError(error: unknown): { errorCode: string; message: string } {
   const candidate = error as { code?: unknown; statusCode?: unknown; message?: unknown };
-  const errorCode = typeof candidate?.code === "string" ? candidate.code : typeof candidate?.statusCode === "number" ? `HTTP_${candidate.statusCode}` : "SLS_REQUEST_FAILED";
-  const message = typeof candidate?.message === "string" ? candidate.message.slice(0, 300) : "SLS request failed";
-  return { errorCode, message };
+  const errorCode = typeof candidate?.code === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(candidate.code)
+    ? candidate.code
+    : typeof candidate?.statusCode === "number" ? `HTTP_${candidate.statusCode}` : "SLS_REQUEST_FAILED";
+  return { errorCode, message: "SLS request failed" };
 }
 
 export class AliyunSlsAdapter implements SlsAdapter {

@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
@@ -15,6 +17,7 @@
   "dependencies": {
     "@alicloud/log": "1.2.6",
     "@gitbeaker/rest": "43.8.0",
+    "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "^7.10.1",
     "@qolmesgpt/contracts": "workspace:*",
     "@qolmesgpt/security": "workspace:*"

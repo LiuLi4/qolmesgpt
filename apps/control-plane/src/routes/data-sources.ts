@@ -13,6 +13,7 @@ export interface SlsDataSourceWriter {
 }
 
 export interface SlsVerificationStore {
+  matchesConfig(connectionId: string, config: ReturnType<typeof normalizeSlsConfig>): Promise<boolean>;
   recordConnection(connectionId: string, result: DataSourceConnectionTestResult): Promise<void>;
   recordRead(connectionId: string, result: DataSourceReadTestResult): Promise<void>;
   canEnable(connectionId: string): Promise<boolean>;
@@ -37,13 +38,17 @@ export class DataSourceRoutes {
   }
 
   async verifyConnection(connectionId: string, input: SlsConfigInput) {
-    const result = await this.adapter.validate(normalizeSlsConfig(input));
+    const config = normalizeSlsConfig(input);
+    if (!this.verifications || !(await this.verifications.matchesConfig(connectionId, config))) throw new Error("SLS configuration does not match the saved connection");
+    const result = await this.adapter.validate(config);
     if (this.verifications) await this.verifications.recordConnection(connectionId, result);
     return result;
   }
 
   async verifyRead(connectionId: string, input: SlsConfigInput, range: SlsRange, limit: number) {
-    const result = await this.adapter.readSample(normalizeSlsConfig(input), range, limit);
+    const config = normalizeSlsConfig(input);
+    if (!this.verifications || !(await this.verifications.matchesConfig(connectionId, config))) throw new Error("SLS configuration does not match the saved connection");
+    const result = await this.adapter.readSample(config, range, limit);
     if (this.verifications) await this.verifications.recordRead(connectionId, result);
     return result;
   }

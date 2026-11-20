@@ -42,6 +42,11 @@ test("default SLS classifier handles structured error signals", () => {
   assert.deepEqual(classifySlsError({ level: 50 }), { isError: true, reason: "level" });
   assert.deepEqual(classifySlsError({ status: 503 }), { isError: true, reason: "status" });
   assert.deepEqual(classifySlsError({ msg: "request failed" }), { isError: true, reason: "keyword" });
+  assert.deepEqual(classifySlsError({ msg: "request timeout" }), { isError: true, reason: "keyword" });
+  assert.deepEqual(classifySlsError({ content: '{"level":50,"msg":"bad request"}' }), { isError: true, reason: "level" });
+  assert.deepEqual(classifySlsError({ content: '{"status":503,"msg":"request completed"}' }), { isError: true, reason: "status" });
+  assert.deepEqual(classifySlsError({ content: '{"level":30,"status":200,"msg":"request completed","error":false}' }), { isError: false, reason: "none" });
+  assert.deepEqual(classifySlsError({ content: '{"level":30,"detail":{"message":"database timeout"}}' }), { isError: true, reason: "keyword" });
   assert.deepEqual(classifySlsError({ level: 30, status: 200, msg: "request completed", content: "ok" }), { isError: false, reason: "none" });
 });
 
@@ -63,6 +68,20 @@ test("SLS adapter validates staging config and distinguishes data from no-data a
   assert.equal(failed.status, "failed");
   assert.equal(failed.errorCode, "Unauthorized");
   assert.doesNotMatch(JSON.stringify(failed), /access-key|secret/);
+});
+
+test("SLS verification failures never expose credentials echoed by the provider", async () => {
+  const adapter = new AliyunSlsAdapter({
+    create: () => ({
+      getProject: async () => { throw Object.assign(new Error(`request rejected: ${config.accessKeySecret}`), { code: "Unauthorized" }); },
+      getLogStore: async () => ({}),
+      getLogs: async () => { throw Object.assign(new Error(`request rejected: ${config.accessKeySecret}`), { code: "Unauthorized" }); },
+    }),
+  });
+  const connection = await adapter.validate(config);
+  const read = await adapter.readSample(config, { from: new Date("2026-11-16T08:30:00Z"), to: new Date("2026-11-16T08:35:00Z") }, 10);
+  assert.equal(connection.errorCode, "Unauthorized");
+  assert.doesNotMatch(JSON.stringify([connection, read]), /secret/);
 });
 
 test("SLS adapter rejects unbounded reads and invalid endpoints", async () => {
@@ -96,6 +115,7 @@ test("enablement requires both successful verification records", async () => {
     { create: async () => ({ id: "source-1", status: "CONFIGURED" as const }) },
     new AliyunSlsAdapter(factory(new FakeSlsClient())),
     {
+      async matchesConfig(_id, input) { return input.project === config.project; },
       async recordConnection(_id, result) { connectionPassed = result.status === "passed"; },
       async recordRead(_id, result) { readPassed = result.status !== "failed"; },
       async canEnable() { return connectionPassed && readPassed; },
@@ -105,5 +125,6 @@ test("enablement requires both successful verification records", async () => {
   await assert.rejects(routes.enable("source-1"), /both pass/);
   await routes.verifyConnection("source-1", config);
   await routes.verifyRead("source-1", config, { from: new Date("2026-11-16T08:30:00Z"), to: new Date("2026-11-16T08:35:00Z") }, 10);
+  await assert.rejects(routes.verifyConnection("source-1", { ...config, project: "another-project" }), /does not match/);
   assert.deepEqual(await routes.enable("source-1"), { status: "ENABLED" });
 });

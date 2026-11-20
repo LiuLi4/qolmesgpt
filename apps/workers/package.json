@@ -7,10 +7,12 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "start": "node dist/sls-consumer/main.js",
+    "test": "pnpm build && node --experimental-strip-types --test test/*.test.ts"
   },
   "dependencies": {
     "@qolmesgpt/contracts": "workspace:*",
+    "@qolmesgpt/control-plane": "workspace:*",
     "protobufjs": "6.11.6"
   }
 }

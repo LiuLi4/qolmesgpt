@@ -232,6 +232,7 @@ model SLSConsumerState {
   connectionId      String               @unique @db.Uuid
   consumerGroup     String
   workerId          String?
+  leaseExpiresAt    DateTime?            @db.Timestamptz(6)
   shardAssignments  Json?
   checkpointSummary Json?
   status            ConsumerStatus       @default(STOPPED)
