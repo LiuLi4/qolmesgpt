@@ -9,5 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test",
     "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@qolmesgpt/control-plane": "workspace:*",
+    "@qolmesgpt/security": "workspace:*"
   }
 }

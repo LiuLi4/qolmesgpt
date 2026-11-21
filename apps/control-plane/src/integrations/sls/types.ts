@@ -4,6 +4,7 @@ export interface SlsConfig {
   readonly endpoint: string;
   readonly project: string;
   readonly logstore: string;
+  readonly consumerGroup?: string;
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
   readonly securityToken?: string;

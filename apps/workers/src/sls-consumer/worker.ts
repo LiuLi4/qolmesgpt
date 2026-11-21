@@ -36,6 +36,10 @@ export function slsConsumerGroup(connectionId: string): string {
   return `qolmesgpt-${connectionId}`;
 }
 
+function consumerGroupFor(source: EnabledSlsSource): string {
+  return source.consumerGroup || slsConsumerGroup(source.id);
+}
+
 export function defaultProtocol(source: EnabledSlsSource, group: string, workerId: string): Protocol {
   return new AliyunSlsConsumerProtocol({
     endpoint: source.endpoint,
@@ -56,7 +60,7 @@ export async function runSlsSource(
   signal: AbortSignal,
   factory: ProtocolFactory = defaultProtocol,
 ): Promise<void> {
-  const group = slsConsumerGroup(source.id);
+  const group = consumerGroupFor(source);
   let backoff = 1_000;
   let lastCheckpoint: string | null = null;
   while (!signal.aborted) {

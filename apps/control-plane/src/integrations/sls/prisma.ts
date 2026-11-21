@@ -13,13 +13,13 @@ export class PrismaSlsDataSourceWriter {
       create: {
         projectId,
         type: "ALIYUN_SLS",
-        configJson: { endpoint: config.endpoint, project: config.project, logstore: config.logstore },
+        configJson: { endpoint: config.endpoint, project: config.project, logstore: config.logstore, consumerGroup: config.consumerGroup },
         credentialsCiphertext: serializeEncryptedSecret(this.cipher.encrypt(JSON.stringify({ accessKeyId: config.accessKeyId, accessKeySecret: config.accessKeySecret, securityToken: config.securityToken }))),
         credentialKeyVersion: this.keyVersion,
         status: "CONFIGURED",
       },
       update: {
-        configJson: { endpoint: config.endpoint, project: config.project, logstore: config.logstore },
+        configJson: { endpoint: config.endpoint, project: config.project, logstore: config.logstore, consumerGroup: config.consumerGroup },
         credentialsCiphertext: serializeEncryptedSecret(this.cipher.encrypt(JSON.stringify({ accessKeyId: config.accessKeyId, accessKeySecret: config.accessKeySecret, securityToken: config.securityToken }))),
         credentialKeyVersion: this.keyVersion,
         status: "CONFIGURED",
@@ -43,7 +43,7 @@ export class PrismaSlsVerificationStore {
     try {
       const settings = saved.configJson as Record<string, unknown>;
       const credentials = JSON.parse(this.cipher.decrypt(saved.credentialsCiphertext)) as Record<string, unknown>;
-      return settings.endpoint === config.endpoint && settings.project === config.project && settings.logstore === config.logstore
+      return settings.endpoint === config.endpoint && settings.project === config.project && settings.logstore === config.logstore && (settings.consumerGroup ?? undefined) === (config.consumerGroup ?? undefined)
         && credentials.accessKeyId === config.accessKeyId && credentials.accessKeySecret === config.accessKeySecret
         && (credentials.securityToken ?? undefined) === (config.securityToken ?? undefined);
     } catch {

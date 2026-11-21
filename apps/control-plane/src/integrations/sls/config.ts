@@ -4,6 +4,7 @@ export interface SlsConfigInput {
   readonly endpoint: string;
   readonly project: string;
   readonly logstore: string;
+  readonly consumerGroup?: string;
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
   readonly securityToken?: string;
@@ -13,6 +14,7 @@ export interface SafeSlsConfig {
   readonly endpoint: string;
   readonly project: string;
   readonly logstore: string;
+  readonly consumerGroup?: string;
   readonly credentialsConfigured: true;
 }
 
@@ -30,6 +32,7 @@ export function normalizeSlsConfig(input: SlsConfigInput): SlsConfig {
     endpoint: endpoint.toString().replace(/\/$/, ""),
     project: input.project.trim(),
     logstore: input.logstore.trim(),
+    ...(input.consumerGroup?.trim() ? { consumerGroup: input.consumerGroup.trim() } : {}),
     accessKeyId: input.accessKeyId,
     accessKeySecret: input.accessKeySecret,
     ...(input.securityToken?.trim() ? { securityToken: input.securityToken } : {}),
@@ -37,5 +40,5 @@ export function normalizeSlsConfig(input: SlsConfigInput): SlsConfig {
 }
 
 export function safeSlsConfig(config: SlsConfig): SafeSlsConfig {
-  return { endpoint: config.endpoint, project: config.project, logstore: config.logstore, credentialsConfigured: true };
+  return { endpoint: config.endpoint, project: config.project, logstore: config.logstore, ...(config.consumerGroup ? { consumerGroup: config.consumerGroup } : {}), credentialsConfigured: true };
 }

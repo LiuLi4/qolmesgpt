@@ -17,6 +17,7 @@ export interface EnabledSlsSource {
   readonly endpoint: string;
   readonly project: string;
   readonly logstore: string;
+  readonly consumerGroup: string;
   readonly accessKeyId: string;
   readonly accessKeySecret: string;
   readonly securityToken?: string;
@@ -117,6 +118,7 @@ export class PrismaSlsDetectionStore {
           endpoint: requiredString(settings.endpoint, "endpoint"),
           project: requiredString(settings.project, "project"),
           logstore: requiredString(settings.logstore, "logstore"),
+          consumerGroup: typeof settings.consumerGroup === "string" && settings.consumerGroup.trim() ? settings.consumerGroup.trim() : `qolmesgpt-${connection.id}`,
           accessKeyId: requiredString(secrets.accessKeyId, "access key ID"),
           accessKeySecret: requiredString(secrets.accessKeySecret, "access key secret"),
           ...(typeof secrets.securityToken === "string" && secrets.securityToken ? { securityToken: secrets.securityToken } : {}),

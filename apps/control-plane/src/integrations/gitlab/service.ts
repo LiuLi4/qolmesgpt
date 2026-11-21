@@ -144,6 +144,13 @@ export class GitLabService {
     return { role, eligible: canApproveGitLabRole(role), checkedAt: this.now().toISOString() };
   }
 
+  async getAccessToken(userId: string, connectionId: string): Promise<string> {
+    const connection = await this.deps.connections.findById(userId, connectionId);
+    if (!connection || connection.status !== "ACTIVE") throw new Error("GitLab connection is unavailable");
+    if (connection.expiresAt && connection.expiresAt <= this.now()) throw new Error("GitLab connection has expired");
+    return this.deps.cipher.decrypt(connection.accessTokenCiphertext);
+  }
+
   private async apiFor(userId: string, connectionId: string) {
     const connection = await this.deps.connections.findById(userId, connectionId);
     if (!connection || connection.status !== "ACTIVE") throw new Error("GitLab connection is unavailable");
