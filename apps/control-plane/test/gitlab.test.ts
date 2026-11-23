@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { MemoryGitLabConnectionStore, MemoryOAuthStateStore } from "../dist/integrations/gitlab/memory.js";
 import { GitLabService } from "../dist/integrations/gitlab/service.js";
 import { normalizeGitLabUrl } from "../dist/integrations/gitlab/crypto.js";
 import { canApproveGitLabRole, mapGitLabRole } from "../dist/integrations/gitlab/roles.js";
-import { GitBeakerApi } from "../dist/integrations/gitlab/gitbeaker.js";
+import { GitBeakerApi, gitBeakerApiFactory } from "../dist/integrations/gitlab/gitbeaker.js";
 import type {
   GitLabApi,
   GitLabApiFactory,
@@ -45,10 +47,10 @@ class FakeApi implements GitLabApi {
   }
 }
 
-function setup(options: { now?: () => Date; valid?: boolean } = {}) {
+function setup(options: { now?: () => Date; valid?: boolean; apiFactory?: GitLabApiFactory } = {}) {
   const connections = new MemoryGitLabConnectionStore();
   const oauthStates = new MemoryOAuthStateStore();
-  const apiFactory: GitLabApiFactory = { create: (_instanceUrl, token) => new FakeApi(token, options.valid ?? true) };
+  const apiFactory: GitLabApiFactory = options.apiFactory ?? { create: (_instanceUrl, token) => new FakeApi(token, options.valid ?? true) };
   const oauthClient: GitLabOAuthClient = {
     authorizationUrl: ({ instanceUrl, state }) => `${instanceUrl}/oauth/authorize?state=${encodeURIComponent(state)}`,
     exchangeCode: async () => ({ accessToken: "oauth-token", refreshToken: "refresh-token", expiresIn: 3600 }),
@@ -160,8 +162,8 @@ test("GitBeaker adapter maps expanded responses and pagination safely", async ()
   const fakeClient = {
     Users: { showCurrentUser: async () => ({ id: 7, username: "alice", name: "Alice" }) },
     Groups: {
-      all: async () => ({ data: [{ id: 1, name: "Acme", full_path: "acme", group_access_level: 40 }], headers: { "x-next-page": "2" } }),
-      allProjects: async () => ({ data: [{ id: 11, name: "Service", path_with_namespace: "acme/service", default_branch: "main", web_url: "https://gitlab.example/acme/service" }], headers: { "x-next-page": "" } }),
+      all: async () => ({ data: [{ id: 1, name: "Acme", full_path: "acme", group_access_level: 40 }], paginationInfo: { next: 2 } }),
+      allProjects: async () => ({ data: [{ id: 11, name: "Service", path_with_namespace: "acme/service", default_branch: "main", web_url: "https://gitlab.example/acme/service" }], paginationInfo: { next: null } }),
     },
     GroupMembers: { show: async () => ({ id: 7, access_level: 50 }) },
   };
@@ -173,4 +175,65 @@ test("GitBeaker adapter maps expanded responses and pagination safely", async ()
   assert.equal(projects.items[0]!.pathWithNamespace, "acme/service");
   assert.equal(projects.nextPage, null);
   assert.equal((await api.getGroupMembership("1", 7)).accessLevel, 50);
+});
+
+test("PAT validation and group/project pagination use real GitBeaker list responses", async (t) => {
+  const requests: string[] = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url!, "http://127.0.0.1");
+    requests.push(url.pathname + url.search);
+    res.setHeader("content-type", "application/json");
+    if (req.headers["private-token"] !== "fixture-token") {
+      res.writeHead(401);
+      res.end(JSON.stringify({ message: "Unauthorized" }));
+      return;
+    }
+    if (url.pathname === "/api/v4/user") {
+      res.end(JSON.stringify({ id: 7, username: "alice", name: "Alice" }));
+      return;
+    }
+    const page = url.searchParams.get("page") ?? "1";
+    res.setHeader("x-page", page);
+    res.setHeader("x-next-page", page === "1" ? "2" : "");
+    res.setHeader("x-per-page", "100");
+    res.setHeader("x-total-pages", "2");
+    if (url.pathname === "/api/v4/groups") {
+      res.end(JSON.stringify([{ id: Number(page), name: `Team ${page}`, full_path: `team-${page}` }]));
+      return;
+    }
+    if (url.pathname === "/api/v4/groups/1/projects") {
+      res.end(JSON.stringify(page === "1" ? [{ id: 11, name: "Service", path_with_namespace: "team-1/service", default_branch: "main", web_url: "http://gitlab.example/team-1/service" }] : []));
+      return;
+    }
+    res.writeHead(404);
+    res.end(JSON.stringify({ message: "Not found" }));
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const { service, connections } = setup({ apiFactory: gitBeakerApiFactory });
+  const connection = await service.connectPAT("user-1", {
+    instanceUrl: `http://127.0.0.1:${address.port}`,
+    personalAccessToken: "fixture-token",
+  });
+  assert.equal(connections.all().length, 1);
+  const firstGroups = await service.listGroups("user-1", connection.id, 1);
+  assert.equal(firstGroups.items[0]!.fullPath, "team-1");
+  assert.equal(firstGroups.nextPage, 2);
+  assert.equal(firstGroups.nextCursor, null);
+  const lastGroups = await service.listGroups("user-1", connection.id, 2);
+  assert.equal(lastGroups.items[0]!.fullPath, "team-2");
+  assert.equal(lastGroups.nextPage, null);
+  const firstProjects = await service.listProjects("user-1", connection.id, "1", 1);
+  assert.equal(firstProjects.items[0]!.pathWithNamespace, "team-1/service");
+  assert.equal(firstProjects.nextPage, 2);
+  const lastProjects = await service.listProjects("user-1", connection.id, "1", 2);
+  assert.deepEqual(lastProjects.items, []);
+  assert.equal(lastProjects.nextPage, null);
+  assert.equal(requests.length, 6);
 });

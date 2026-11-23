@@ -1,18 +1,9 @@
-import { Gitlab } from "@gitbeaker/rest";
+import { Gitlab, type PaginatedResponse } from "@gitbeaker/rest";
 import type { GitLabApi, GitLabGroupSummary, GitLabPage, GitLabProjectSummary, GitLabUser, GitLabMembership } from "./types.js";
 import { mapGitLabRole } from "./roles.js";
 
-interface ExpandedResponse<T> {
-  data: T;
-  headers: Record<string, string>;
-}
-
-function pageFrom<T>(response: T[] | ExpandedResponse<T[]>): GitLabPage<T> {
-  const body = Array.isArray(response) ? response : response.data;
-  const headers = Array.isArray(response) ? {} : response.headers;
-  const nextPageValue = headers["x-next-page"];
-  const nextPage = nextPageValue ? Number(nextPageValue) || null : null;
-  return { items: body, nextPage, nextCursor: headers["x-next-cursor"] ?? null };
+function pageFrom<T>(response: PaginatedResponse<T[], "offset">): GitLabPage<T> {
+  return { items: response.data, nextPage: response.paginationInfo.next, nextCursor: null };
 }
 
 export class GitBeakerApi implements GitLabApi {
@@ -25,12 +16,12 @@ export class GitBeakerApi implements GitLabApi {
 
   async listGroups(page = 1): Promise<GitLabPage<GitLabGroupSummary>> {
     const response = await this.client.Groups.all({ pagination: "offset", page, perPage: 100, showExpanded: true });
-    const result = pageFrom(response as unknown as GitLabGroupSummary[] | ExpandedResponse<GitLabGroupSummary[]>);
+    const result = pageFrom(response);
     return {
       ...result,
       items: result.items.map((group) => ({
         id: String(group.id),
-        fullPath: group.fullPath ?? (group as unknown as { full_path?: string }).full_path ?? group.name,
+        fullPath: group.full_path ?? group.name,
         name: group.name,
         role: mapGitLabRole(
           (group as unknown as { accessLevel?: number; access_level?: number; group_access_level?: number }).accessLevel ??
@@ -44,7 +35,7 @@ export class GitBeakerApi implements GitLabApi {
 
   async listGroupProjects(groupId: string, page = 1): Promise<GitLabPage<GitLabProjectSummary>> {
     const response = await this.client.Groups.allProjects(groupId, { pagination: "offset", page, perPage: 100, showExpanded: true });
-    const result = pageFrom(response as unknown as GitLabProjectSummary[] | ExpandedResponse<GitLabProjectSummary[]>);
+    const result = pageFrom(response);
     return {
       ...result,
       items: result.items.map((project) => {
