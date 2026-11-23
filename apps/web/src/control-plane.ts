@@ -3,6 +3,7 @@ import {
   DataSourceRoutes,
   FetchGitLabOAuthClient,
   GitLabService,
+  GroupWorkspaceService,
   PrismaApprovalStore,
   PrismaClient,
   PrismaGitLabConnectionStore,
@@ -23,6 +24,7 @@ export interface WebRuntime {
   readonly userId: string;
   readonly sls: DataSourceRoutes;
   readonly gitlab: GitLabService;
+  readonly workspaces: GroupWorkspaceService;
   readonly approvals: ApprovalRoutes;
   readonly close: () => Promise<void>;
 }
@@ -88,13 +90,14 @@ async function createRuntime(): Promise<WebRuntime> {
     cipher,
     keyVersion,
   });
+  const workspaces = new GroupWorkspaceService(prisma, gitlab, process.env.QOLMESGPT_WORKSPACE_ROOT ?? join(process.cwd(), ".qolmesgpt-workspaces"));
   const sls = new DataSourceRoutes(
     new PrismaSlsDataSourceWriter(prisma, cipher, keyVersion),
     undefined,
     new PrismaSlsVerificationStore(prisma, cipher),
   );
   const approvals = new ApprovalRoutes(new PrismaApprovalStore(prisma), gitlab);
-  return { prisma, userId: user.id, sls, gitlab, approvals, close: () => prisma.$disconnect() };
+  return { prisma, userId: user.id, sls, gitlab, workspaces, approvals, close: () => prisma.$disconnect() };
 }
 
 export async function getWebRuntime(): Promise<WebRuntime> {

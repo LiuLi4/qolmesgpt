@@ -24,3 +24,5 @@ export { GitLabService } from "./integrations/gitlab/service.js";
 export { FetchGitLabOAuthClient } from "./integrations/gitlab/oauth.js";
 export { gitBeakerApiFactory } from "./integrations/gitlab/gitbeaker.js";
 export { DataSourceRoutes } from "./routes/data-sources.js";
+
+export { GroupWorkspaceService } from "./workspace/group.js";

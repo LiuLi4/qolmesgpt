@@ -7,7 +7,7 @@
 
 **Feature ID**: `2026-1119-14537g`
 **Status**: Confirmed baseline
-**Last Confirmed**: 2026-11-19 16:10 Asia/Shanghai
+**Last Confirmed**: 2026-11-23 Asia/Shanghai
 
 ## Authority Rules
 
@@ -28,7 +28,8 @@
 
 ### NEED-002: User-authorized GitLab project selection
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: NEED-009, CON-006, DEC-014（2026-11-23 Group Workspace 决策）
 - **Statement**: A user must be able to connect GitLab and select a project that is visible within that user's GitLab permissions.
 - **Rationale**: All later workspace, log source, investigation, and repair operations are scoped to a GitLab project.
 - **User Evidence**: “选择gitlab中的项目，以这个项目建立独立的workspace。” The user selected user-level GitLab connections.
@@ -36,7 +37,8 @@
 
 ### NEED-003: Project-scoped checkout workspace
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: NEED-009, CON-006, DEC-014（2026-11-23 Group Workspace 决策）
 - **Statement**: Selecting a GitLab project must create or reuse a persistent, project-specific checkout directory that can be used by investigation, code modification, testing, and merge request operations.
 - **Rationale**: Investigation and remediation need a stable code context and must not overwrite another project's files.
 - **User Evidence**: The user selected “项目独立 checkout 目录” for the workspace.
@@ -52,7 +54,8 @@
 
 ### NEED-005: Configure and verify SLS per project
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: NEED-009, CON-006, DEC-014（2026-11-23 Group Workspace 决策）
 - **Statement**: After selecting a project, the user must be able to associate an SLS data source, configure its Project, Logstore, Endpoint, and access credentials in the Web UI, test connectivity, and verify that logs can be read before enabling detection.
 - **Rationale**: A successful configuration must be observable before background detection starts.
 - **User Evidence**: “关联选择项目对应的日志的来源……然后进行配置，配置成功后测试是否可以成功读取到日志信息。” The user selected Web UI configuration with encrypted credential storage.
@@ -61,7 +64,7 @@
 ### NEED-006: Continuous log detection and investigation task cards
 
 - **Status**: confirmed
-- **Statement**: Each enabled project data source must be monitored continuously, 24 hours per day and 7 days per week. When an error is detected, the system must create an investigation task card and invoke the HolmesGPT investigation execution engine.
+- **Statement**: Each enabled workspace data source must be monitored continuously, 24 hours per day and 7 days per week. When an error is detected, the system must create an investigation task card and invoke the HolmesGPT investigation execution engine.
 - **Rationale**: The product must turn unhandled log errors into traceable investigations rather than requiring a user to start each investigation manually.
 - **User Evidence**: “每个接入的data source进行7✖️24小时的日志检测，当发现报错，建立任务卡片 HolmesGPT 的调查执行引擎 开始查询报错原因。”
 - **Confirmed At**: 2026-11-19 15:00 Asia/Shanghai
@@ -98,7 +101,8 @@
 
 ### CON-003: Isolate project workspaces and concurrent tasks
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: NEED-009, CON-006, DEC-014（2026-11-23 Group Workspace 决策）
 - **Statement**: A workspace must be scoped to one GitLab project and must provide state and locking controls so concurrent investigation, repair, and test tasks cannot overwrite one another.
 - **User Evidence**: The user selected a project-specific checkout directory.
 
@@ -142,7 +146,8 @@
 
 ### DEC-004: Persistent project checkout workspace
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: NEED-009, CON-006, DEC-014（2026-11-23 Group Workspace 决策）
 - **Decision**: Maintain a persistent independent checkout directory for each project.
 - **Alternatives Rejected**: Temporary clone on every task; project-per-container as the first implementation.
 - **Reason**: This supports reuse across investigation, code changes, tests, and MR creation while keeping implementation complexity manageable for the first release.
@@ -304,3 +309,32 @@
 - **Summary Presented**: GitLab Group permission boundary, PostgreSQL + Prisma deployment, SLS real-time consumption, one task per error log, basic high-priority task flow, Developer/Maintainer/Owner single approval, and dual repair verification with project tests plus SLS re-query.
 - **User Confirmation**: “确认，将这 7 项写入 requirements.md 和 spec.md”。
 - **Entries Confirmed**: DEC-007, DEC-008, DEC-009, DEC-010, DEC-011, DEC-012, DEC-013
+
+## 已确认的 Group Workspace 范围（2026-11-23）
+
+### NEED-009: Group Workspace 与统一日志来源
+
+- **Status**: confirmed
+- **Statement**: 用户选择 GitLab Group 建立一个持久化 Workspace，递归纳入该 Group 及子 Group 中当前连接有权访问的全部项目。SLS 数据源绑定 Workspace，覆盖这些仓库的日志；逐条错误任务归属 Workspace，调查可关联一个或多个仓库。
+- **User Evidence**: “一个日志收集器记录的是group下所有项目的日志信息，workspace最终不应该定位到一个项目 而是应该定位到group下的所有项目”；“确认，包含子 Group，按上述范围实现”。
+- **Confirmed At**: 2026-11-23 Asia/Shanghai
+
+### CON-006: 组范围调查和仓库范围修改
+
+- **Status**: confirmed
+- **Statement**: Workspace 是日志和调查的业务范围；仓库各有独立 checkout、分支、锁、测试和 MR。调查结果明确受影响仓库后，经人工审批才可逐仓修复、验证和创建 MR。无法定位仓库的错误保留任务并明确显示未定位，不得自动选首个仓库修改。
+- **User Evidence**: 用户确认 Group Workspace、跨仓调查和各仓独立修改、测试及 MR 的范围。
+
+### DEC-014: Group Workspace 和独立仓库 checkout
+
+- **Status**: confirmed
+- **Decision**: 以 GitLab Group 创建/复用 Workspace，递归分页获取全部可访问项目（不包含仅分享给 Group 的外部项目）。维护 Workspace 与项目的关联；SLS 配置只关联 Workspace。保留仓库级 checkout 供只读调查和审批后修复。
+- **Alternatives Rejected**: 日志源绑定单个项目；仅包含直属项目；将多个仓库合并为一个 Git 仓库。
+- **Reason**: 一个 SLS 日志收集器覆盖整个 Group 的项目，单项目模型不能准确表达调查范围。
+- **User Evidence**: “确认，包含子 Group，按上述范围实现”。
+
+### Confirmation 2026-11-23 Asia/Shanghai
+
+- **Summary Presented**: 一个 Group 建立 Workspace，包含子 Group 中可访问的全部项目；SLS 绑定 Workspace；调查可跨仓，人工审批后对涉及仓库分别修改、测试并提交 MR。
+- **User Response**: “确认，包含子 Group，按上述范围实现”。
+- **Result**: NEED-009、CON-006、DEC-014 confirmed；原单项目范围 superseded。

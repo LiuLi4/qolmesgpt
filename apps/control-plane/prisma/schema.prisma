@@ -152,6 +152,7 @@ model GitLabGroup {
   roleSyncedAt    DateTime?        @db.Timestamptz(6)
   connection      GitLabConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
   projects        Project[]
+  workspace       GroupWorkspace?
 
   @@unique([connectionId, externalGroupId])
   @@index([connectionId, fullPath])
@@ -173,6 +174,8 @@ model Project {
   workspace         ProjectWorkspace?
   dataSources       DataSourceConnection[]
   tasks             InvestigationTask[]
+  workspaceMemberships WorkspaceRepository[]
+  investigationTargets TaskRepository[]
 
   @@unique([connectionId, externalProjectId])
   @@index([groupId, pathWithNamespace])
@@ -185,6 +188,7 @@ model ProjectWorkspace {
   headSha       String?
   branch        String?
   status        WorkspaceStatus @default(INITIALIZING)
+  errorMessage  String?
   lockOwner     String?
   lockExpiresAt DateTime?       @db.Timestamptz(6)
   fencingToken  BigInt          @default(0)
@@ -196,7 +200,8 @@ model ProjectWorkspace {
 
 model DataSourceConnection {
   id                    String                   @id @default(uuid()) @db.Uuid
-  projectId             String                   @db.Uuid
+  projectId             String?                  @db.Uuid
+  workspaceId           String?                  @db.Uuid
   type                  DataSourceType
   configJson            Json
   credentialsCiphertext String
@@ -205,12 +210,14 @@ model DataSourceConnection {
   enabledAt             DateTime?                @db.Timestamptz(6)
   createdAt             DateTime                 @default(now()) @db.Timestamptz(6)
   updatedAt             DateTime                 @updatedAt @db.Timestamptz(6)
-  project               Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project               Project?                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace             GroupWorkspace?          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   verifications         DataSourceVerification[]
   consumerState         SLSConsumerState?
   errorEvents           ErrorEvent[]
 
   @@unique([projectId, type])
+  @@unique([workspaceId, type])
   @@index([projectId, status])
 }
 
@@ -259,20 +266,24 @@ model ErrorEvent {
 
 model InvestigationTask {
   id                      String                  @id @default(uuid()) @db.Uuid
-  projectId               String                  @db.Uuid
+  projectId               String?                 @db.Uuid
+  workspaceId             String?                 @db.Uuid
   errorEventId            String                  @unique @db.Uuid
   status                  InvestigationTaskStatus @default(INVESTIGATION_PENDING)
   priority                TaskPriority            @default(HIGH)
   investigationResultJson Json?
   createdAt               DateTime                @default(now()) @db.Timestamptz(6)
   updatedAt               DateTime                @updatedAt @db.Timestamptz(6)
-  project                 Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project                 Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace               GroupWorkspace?         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repositories            TaskRepository[]
   errorEvent              ErrorEvent              @relation(fields: [errorEventId], references: [id], onDelete: Cascade)
   approvals               Approval[]
   repairRuns              RepairRun[]
   outboxMessages          OutboxMessage[]
 
   @@index([projectId, status, createdAt])
+  @@index([workspaceId, status, createdAt])
 }
 
 model Approval {
@@ -336,4 +347,40 @@ model OutboxMessage {
 
   @@index([availableAt, claimedAt])
   @@index([aggregateType, aggregateId])
+}
+
+model GroupWorkspace {
+  id            String          @id @default(uuid()) @db.Uuid
+  groupId       String          @unique @db.Uuid
+  relativePath  String          @unique
+  status        WorkspaceStatus @default(INITIALIZING)
+  lastSyncedAt  DateTime?        @db.Timestamptz(6)
+  errorMessage  String?
+  syncOwner     String?
+  syncExpiresAt DateTime?        @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @db.Timestamptz(6)
+  group         GitLabGroup      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  repositories  WorkspaceRepository[]
+  dataSources   DataSourceConnection[]
+  tasks         InvestigationTask[]
+}
+
+model WorkspaceRepository {
+  workspaceId String         @db.Uuid
+  projectId   String         @db.Uuid
+  active      Boolean        @default(true)
+  workspace   GroupWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, projectId])
+}
+
+model TaskRepository {
+  taskId    String            @db.Uuid
+  projectId String            @db.Uuid
+  task      InvestigationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, projectId])
 }

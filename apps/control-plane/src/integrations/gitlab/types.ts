@@ -23,6 +23,8 @@ export interface GitLabProjectSummary {
   readonly pathWithNamespace: string;
   readonly defaultBranch: string;
   readonly webUrl: string;
+  readonly namespacePath?: string;
+  readonly remoteUrl?: string;
 }
 
 export interface GitLabPage<T> {
@@ -38,8 +40,9 @@ export interface GitLabMembership {
 
 export interface GitLabApi {
   currentUser(): Promise<GitLabUser>;
+  getGroup(groupId: string): Promise<GitLabGroupSummary>;
   listGroups(page?: number): Promise<GitLabPage<GitLabGroupSummary>>;
-  listGroupProjects(groupId: string, page?: number): Promise<GitLabPage<GitLabProjectSummary>>;
+  listGroupProjects(groupId: string, page?: number, includeSubgroups?: boolean): Promise<GitLabPage<GitLabProjectSummary>>;
   getGroupMembership(groupId: string, userId: number): Promise<GitLabMembership>;
 }
 

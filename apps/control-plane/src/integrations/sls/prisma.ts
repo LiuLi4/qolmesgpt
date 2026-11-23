@@ -8,10 +8,21 @@ export class PrismaSlsDataSourceWriter {
   constructor(private readonly prisma: PrismaClient, private readonly cipher: SecretCipher, private readonly keyVersion: string) {}
 
   async create(projectId: string, config: SlsConfig): Promise<{ id: string; status: "CONFIGURED" }> {
+    return this.store({ projectId }, config);
+  }
+
+  async createForWorkspace(workspaceId: string, userId: string, config: SlsConfig): Promise<{ id: string; status: "CONFIGURED" }> {
+    const workspace = await this.prisma.groupWorkspace.findFirst({ where: { id: workspaceId, group: { connection: { userId, status: "ACTIVE" } } } });
+    if (!workspace) throw new Error("Group Workspace is unavailable");
+    if (workspace.status !== "READY") throw new Error("Group Workspace repository synchronization must complete before configuring SLS");
+    return this.store({ workspaceId }, config);
+  }
+
+  private async store(scope: { projectId: string; workspaceId?: never } | { workspaceId: string; projectId?: never }, config: SlsConfig): Promise<{ id: string; status: "CONFIGURED" }> {
     const stored = await this.prisma.dataSourceConnection.upsert({
-      where: { projectId_type: { projectId, type: "ALIYUN_SLS" } },
+      where: scope.workspaceId ? { workspaceId_type: { workspaceId: scope.workspaceId, type: "ALIYUN_SLS" } } : { projectId_type: { projectId: scope.projectId!, type: "ALIYUN_SLS" } },
       create: {
-        projectId,
+        ...scope,
         type: "ALIYUN_SLS",
         configJson: { endpoint: config.endpoint, project: config.project, logstore: config.logstore, consumerGroup: config.consumerGroup },
         credentialsCiphertext: serializeEncryptedSecret(this.cipher.encrypt(JSON.stringify({ accessKeyId: config.accessKeyId, accessKeySecret: config.accessKeySecret, securityToken: config.securityToken }))),

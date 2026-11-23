@@ -134,6 +134,24 @@ export class GitLabService {
     return api.listGroups(page);
   }
 
+  async getGroup(userId: string, connectionId: string, groupId: string): Promise<GitLabGroupSummary> {
+    return (await this.apiFor(userId, connectionId)).getGroup(groupId);
+  }
+
+  async listWorkspaceProjects(userId: string, connectionId: string, groupId: string): Promise<GitLabProjectSummary[]> {
+    const api = await this.apiFor(userId, connectionId);
+    const result = new Map<string, GitLabProjectSummary>();
+    let page = 1;
+    for (let count = 0; count < 1_000; count++) {
+      const response = await api.listGroupProjects(groupId, page, true);
+      for (const project of response.items) result.set(project.id, project);
+      if (!response.nextPage) return [...result.values()];
+      if (response.nextPage <= page) throw new Error("Invalid GitLab project pagination");
+      page = response.nextPage;
+    }
+    throw new Error("GitLab Group exceeds the 100000-project synchronization limit");
+  }
+
   async listProjects(userId: string, connectionId: string, groupId: string, page = 1): Promise<GitLabPage<GitLabProjectSummary>> {
     const api = await this.apiFor(userId, connectionId);
     return api.listGroupProjects(groupId, page);

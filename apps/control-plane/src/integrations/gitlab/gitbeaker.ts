@@ -14,6 +14,11 @@ export class GitBeakerApi implements GitLabApi {
     return { id: user.id, username: user.username, name: user.name };
   }
 
+  async getGroup(groupId: string): Promise<GitLabGroupSummary> {
+    const group = await this.client.Groups.show(groupId);
+    return { id: String(group.id), fullPath: group.full_path, name: group.name, role: "UNKNOWN", roleCheckedAt: null };
+  }
+
   async listGroups(page = 1): Promise<GitLabPage<GitLabGroupSummary>> {
     const response = await this.client.Groups.all({ pagination: "offset", page, perPage: 100, showExpanded: true });
     const result = pageFrom(response);
@@ -33,16 +38,19 @@ export class GitBeakerApi implements GitLabApi {
     };
   }
 
-  async listGroupProjects(groupId: string, page = 1): Promise<GitLabPage<GitLabProjectSummary>> {
-    const response = await this.client.Groups.allProjects(groupId, { pagination: "offset", page, perPage: 100, showExpanded: true });
+  async listGroupProjects(groupId: string, page = 1, includeSubgroups = false): Promise<GitLabPage<GitLabProjectSummary>> {
+    const response = await this.client.Groups.allProjects(groupId, { pagination: "offset", page, perPage: 100, showExpanded: true, includeSubgroups, withShared: false });
     const result = pageFrom(response);
     return {
       ...result,
       items: result.items.map((project) => {
         const raw = project as unknown as Record<string, unknown>;
+        const namespace = raw.namespace as { id?: number; full_path?: string } | undefined;
         return {
           id: String(raw.id),
-          groupId,
+          groupId: String(namespace?.id ?? groupId),
+          namespacePath: namespace?.full_path,
+          remoteUrl: typeof raw.http_url_to_repo === "string" ? raw.http_url_to_repo : undefined,
           name: String(raw.name),
           pathWithNamespace: String(raw.path_with_namespace ?? raw.pathWithNamespace),
           defaultBranch: String(raw.default_branch ?? raw.defaultBranch ?? "main"),

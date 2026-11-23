@@ -55,3 +55,9 @@ OAuth 成功回调后，页面会加载已连接用户的 Group 和项目。
 - Token exchange failed：检查机密应用的 Secret，以及 GitLab 的 PKCE 支持。
 
 HTTP GitLab 实例会明文传输授权码、Token 和代码，应在已确认的可信网络中使用。
+
+## Group Workspace
+
+在 Web UI 选择 GitLab Group 后，QolmesGPT 会通过 Group Projects API 分页同步该 Group 及子 Group 中当前账号可访问的仓库，并把共享 SLS 数据源绑定到 Group Workspace。每个仓库仍保留独立 checkout、状态和锁，供只读调查及审批后的逐仓修复使用。
+
+调查结果必须列出受影响仓库 ID；无法定位仓库时任务可以继续保留证据，但审批按钮保持禁用。审批后只对调查列出的仓库执行代码修改、项目测试和 MR 创建。

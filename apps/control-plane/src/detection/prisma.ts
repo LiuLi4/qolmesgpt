@@ -13,7 +13,8 @@ export interface EnabledSlsSource {
   readonly id: string;
   readonly revision: number;
   readonly enabledAt: Date;
-  readonly projectId: string;
+  readonly projectId: string | null;
+  readonly workspaceId?: string | null;
   readonly endpoint: string;
   readonly project: string;
   readonly logstore: string;
@@ -103,7 +104,7 @@ export class PrismaSlsDetectionStore {
   async listEnabled(): Promise<EnabledSlsSource[]> {
     const connections = await this.prisma.dataSourceConnection.findMany({
       where: { status: "ENABLED", type: "ALIYUN_SLS" },
-      select: { id: true, projectId: true, configJson: true, credentialsCiphertext: true, updatedAt: true, enabledAt: true },
+      select: { id: true, projectId: true, workspaceId: true, configJson: true, credentialsCiphertext: true, updatedAt: true, enabledAt: true },
     });
     const enabled: EnabledSlsSource[] = [];
     for (const connection of connections) {
@@ -115,6 +116,7 @@ export class PrismaSlsDetectionStore {
           revision: connection.updatedAt.getTime(),
           enabledAt: connection.enabledAt ?? connection.updatedAt,
           projectId: connection.projectId,
+          workspaceId: connection.workspaceId,
           endpoint: requiredString(settings.endpoint, "endpoint"),
           project: requiredString(settings.project, "project"),
           logstore: requiredString(settings.logstore, "logstore"),
@@ -134,7 +136,7 @@ export class PrismaSlsDetectionStore {
     return enabled;
   }
 
-  async persist(source: Pick<EnabledSlsSource, "id" | "projectId"> & Partial<Pick<EnabledSlsSource, "accessKeyId" | "accessKeySecret" | "securityToken">>, logs: readonly DetectionLog[], workerId?: string): Promise<number> {
+  async persist(source: Pick<EnabledSlsSource, "id" | "projectId"> & Partial<Pick<EnabledSlsSource, "workspaceId" | "accessKeyId" | "accessKeySecret" | "securityToken">>, logs: readonly DetectionLog[], workerId?: string): Promise<number> {
     if (workerId && !(await this.renew(source.id, workerId))) throw new Error("SLS worker lost its connection lease");
     const matches = [...new Map(logs
       .filter(({ record }) => classifySlsError(record).isError)
@@ -163,6 +165,7 @@ export class PrismaSlsDetectionStore {
         const tasks = await tx.investigationTask.createManyAndReturn({
           data: events.map((event) => ({
             projectId: source.projectId,
+            workspaceId: source.workspaceId ?? null,
             errorEventId: event.id,
             status: "INVESTIGATION_PENDING",
             priority: "HIGH",
@@ -174,7 +177,7 @@ export class PrismaSlsDetectionStore {
             aggregateType: "InvestigationTask",
             aggregateId: task.id,
             eventType: "InvestigationRequested",
-            payload: { taskId: task.id, projectId: source.projectId, connectionId: source.id },
+            payload: { taskId: task.id, projectId: source.projectId, workspaceId: source.workspaceId ?? null, connectionId: source.id },
           })),
         });
         return tasks.length;

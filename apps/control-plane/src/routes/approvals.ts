@@ -6,6 +6,7 @@ export interface ApprovalTask {
   readonly projectId: string;
   readonly groupId: string;
   readonly gitLabConnectionId: string;
+  readonly repositories?: readonly { projectId: string; groupId: string }[];
   readonly status: "AWAITING_APPROVAL" | "REPAIRING" | "FAILED" | "CLOSED";
 }
 
@@ -32,8 +33,13 @@ export class ApprovalRoutes {
     const task = await this.store.findTask(taskId);
     if (!task || task.status !== "AWAITING_APPROVAL") throw new Error("Task is not awaiting approval");
     if (await this.store.findDecision(taskId)) throw new Error("Task already has a decision");
+    if (!task.projectId && !task.repositories?.length) throw new Error("Investigation must identify at least one repository before repair approval");
     const role = await this.gitlab.getApprovalRole(userId, task.gitLabConnectionId, task.groupId);
     if (!role.eligible || !canApproveGitLabRole(role.role)) throw new Error("GitLab Group role cannot approve repairs");
+    for (const repository of task.repositories ?? []) {
+      const targetRole = await this.gitlab.getApprovalRole(userId, task.gitLabConnectionId, repository.groupId);
+      if (!targetRole.eligible || !canApproveGitLabRole(targetRole.role)) throw new Error("GitLab Group role cannot approve the target repository");
+    }
     const eligibleRole = role.role as "DEVELOPER" | "MAINTAINER" | "OWNER";
     return this.store.createApproval({ taskId, approverUserId: userId, role: eligibleRole, decision: "APPROVED", roleCheckedAt: role.checkedAt });
   }

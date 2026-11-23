@@ -69,6 +69,7 @@ export class PrismaRepairStore implements RepairStore, RepairOutboxStore {
       },
     });
     const approval = task?.approvals[0];
+    if (!task?.project || !task.projectId) return null;
     if (!task || !approval || approval.decision !== "APPROVED" || (task.status !== "AWAITING_APPROVAL" && task.status !== "REPAIRING") || !task.project.workspace || task.project.workspace.status !== "READY" && task.project.workspace.status !== "OCCUPIED") return null;
     return {
       taskId,
@@ -85,6 +86,7 @@ export class PrismaRepairStore implements RepairStore, RepairOutboxStore {
   async start(taskId: string, workspacePath: string, owner: string, fencingToken: bigint): Promise<{ repairRunId: string; fencingToken: bigint }> {
     return this.prisma.$transaction(async (tx) => {
       const task = await tx.investigationTask.findUnique({ where: { id: taskId }, select: { projectId: true, status: true, approvals: { where: { decision: "APPROVED" }, select: { id: true } }, project: { select: { workspace: { select: { id: true, relativePath: true } } } } } });
+      if (!task?.projectId || !task.project) throw new Error("Approved project task or workspace is unavailable");
       if (!task || task.status !== "AWAITING_APPROVAL" || !task.approvals.length || !task.project.workspace) throw new Error("Approved repair task or workspace is unavailable");
       const expectedPath = `${this.workspaceRoot.replace(/\/$/, "")}/${task.project.workspace.relativePath}`;
       if (workspacePath !== expectedPath) throw new Error("Repair workspace path does not match the project record");

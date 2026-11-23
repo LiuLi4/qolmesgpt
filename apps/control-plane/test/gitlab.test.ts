@@ -33,6 +33,10 @@ class FakeApi implements GitLabApi {
     return { id: 7, username: "alice", name: "Alice" };
   }
 
+  async getGroup(groupId: string) {
+    return { id: groupId, fullPath: "acme", name: "acme", role: "DEVELOPER" as const, roleCheckedAt: null };
+  }
+
   async listGroups() {
     if (!this.valid) throw new Error("insufficient scope");
     return { items: [{ id: "1", fullPath: "acme", name: "acme", role: "DEVELOPER" as const, roleCheckedAt: null }], nextPage: null, nextCursor: null };
@@ -235,5 +239,8 @@ test("PAT validation and group/project pagination use real GitBeaker list respon
   const lastProjects = await service.listProjects("user-1", connection.id, "1", 2);
   assert.deepEqual(lastProjects.items, []);
   assert.equal(lastProjects.nextPage, null);
-  assert.equal(requests.length, 6);
+  const workspaceProjects = await service.listWorkspaceProjects("user-1", connection.id, "1");
+  assert.deepEqual(workspaceProjects.map((project) => project.pathWithNamespace), ["team-1/service"]);
+  assert.ok(requests.some((request) => request.includes("include_subgroups=true") && request.includes("with_shared=false")));
+  assert.equal(requests.length, 8);
 });

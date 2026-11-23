@@ -66,13 +66,18 @@ async function statePayload() {
     orderBy: { updatedAt: "desc" },
     include: { workspace: true, dataSources: { include: { consumerState: true } } },
   });
+  const groupWorkspaces = await runtime.prisma.groupWorkspace.findMany({
+    where: { group: { connection: { userId: runtime.userId } } },
+    include: { group: true, repositories: { where: { active: true }, include: { project: { include: { workspace: true } } } }, dataSources: { include: { consumerState: true } } },
+    orderBy: { updatedAt: "desc" },
+  });
   const tasks = await runtime.prisma.investigationTask.findMany({
-    where: { project: { createdByUserId: runtime.userId } },
+    where: { OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
     orderBy: { updatedAt: "desc" },
     take: 100,
-    include: { project: { select: { id: true, pathWithNamespace: true } }, errorEvent: { select: { logEvidenceJson: true } }, approvals: { select: { decision: true, approvedAt: true }, take: 1 } },
+    include: { project: { select: { id: true, pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { id: true, pathWithNamespace: true } } } }, errorEvent: { select: { logEvidenceJson: true } }, approvals: { select: { decision: true, approvedAt: true }, take: 1 } },
   });
-  const sources = projects.flatMap((project) => project.dataSources.map((source) => {
+  const sources = [...projects.flatMap((project) => project.dataSources.map((source) => {
     const config = source.configJson as Record<string, unknown>;
     return {
       id: source.id,
@@ -85,9 +90,20 @@ async function statePayload() {
       status: source.status,
       consumerStatus: source.consumerState?.status ?? "STOPPED",
     };
-  }));
+  })), ...groupWorkspaces.flatMap((workspace) => workspace.dataSources.map((source) => ({
+    id: source.id,
+    workspaceId: workspace.id,
+    projectId: null,
+    name: "Aliyun SLS",
+    project: String((source.configJson as Record<string, unknown>).project ?? ""),
+    logstore: String((source.configJson as Record<string, unknown>).logstore ?? ""),
+    endpoint: String((source.configJson as Record<string, unknown>).endpoint ?? ""),
+    consumerGroup: source.consumerState?.consumerGroup ?? String((source.configJson as Record<string, unknown>).consumerGroup ?? ""),
+    status: source.status,
+    consumerStatus: source.consumerState?.status ?? "STOPPED",
+  })))];
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const errorCount = await runtime.prisma.errorEvent.count({ where: { sourceTimestamp: { gte: cutoff }, dataSourceConnection: { project: { createdByUserId: runtime.userId } } } });
+  const errorCount = await runtime.prisma.errorEvent.count({ where: { sourceTimestamp: { gte: cutoff }, dataSourceConnection: { OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] } } });
   return {
     projects: projects.map((project) => ({
       id: project.id,
@@ -98,12 +114,22 @@ async function statePayload() {
       status: project.workspace?.status === "FAILED" ? "attention" : "healthy",
       health: project.workspace?.status === "READY" ? 100 : project.workspace ? 60 : 25,
     })),
+    workspaces: groupWorkspaces.map((workspace) => ({
+      id: workspace.id,
+      group: workspace.group.fullPath,
+      status: workspace.status,
+      relativePath: workspace.relativePath,
+      errorMessage: workspace.errorMessage,
+      repositories: workspace.repositories.map(({ project }) => ({ id: project.id, pathWithNamespace: project.pathWithNamespace, status: project.workspace?.status ?? "INITIALIZING", errorMessage: project.workspace?.errorMessage ?? null })),
+      dataSources: workspace.dataSources.map((source) => ({ id: source.id, type: source.type, status: source.status, consumerStatus: source.consumerState?.status ?? "STOPPED" })),
+    })),
     sources,
     tasks: tasks.map((task) => {
       const approval = task.approvals[0];
       return {
         id: task.id,
-        project: task.project.pathWithNamespace,
+        project: task.project?.pathWithNamespace ?? task.workspace?.group.fullPath ?? "Group Workspace",
+        repositories: task.repositories.map(({ project }) => project.pathWithNamespace),
         title: `日志错误事件 ${task.errorEvent.logEvidenceJson && typeof task.errorEvent.logEvidenceJson === "object" ? String((task.errorEvent.logEvidenceJson as Record<string, unknown>).msg ?? "需要调查") : "需要调查"}`,
         status: task.status,
         statusLabel: statusLabel(task.status, approval?.decision === "APPROVED"),
@@ -190,7 +216,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const runtime = await getWebRuntime();
       const body = await readBody(req);
       const projectId = String(body.projectId ?? "");
-      if (!projectId) throw new Error("请先选择 GitLab 项目");
+      const workspaceId = String(body.workspaceId ?? "");
+      if (Boolean(projectId) === Boolean(workspaceId)) throw new Error("请先选择 Group Workspace");
       const endpoint = String(body.endpoint ?? "");
       const project = String(body.project ?? "");
       const logstore = String(body.logstore ?? "");
@@ -199,7 +226,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const accessKeySecret = String(body.accessKeySecret ?? process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET ?? process.env.SLS_ACCESS_KEY_SECRET ?? "");
       const securityToken = String(body.securityToken ?? process.env.ALIBABA_CLOUD_SECURITY_TOKEN ?? process.env.SLS_SECURITY_TOKEN ?? "");
       const config = { endpoint, project, logstore, consumerGroup, accessKeyId, accessKeySecret, ...(securityToken ? { securityToken } : {}) };
-      const connection = await runtime.sls.createSls({ userId: runtime.userId, projectId }, config);
+      const connection = await runtime.sls.createSls({ userId: runtime.userId, projectId: projectId || undefined, workspaceId: workspaceId || undefined }, config);
       const connectionTest = await runtime.sls.verifyConnection(connection.id, config);
       const now = new Date();
       const readTest = await runtime.sls.verifyRead(connection.id, config, { from: safeDate(body.from, new Date(now.getTime() - 5 * 60_000)), to: safeDate(body.to, now) }, Math.min(100, Math.max(1, Number(body.limit ?? 20))));
@@ -212,13 +239,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (taskDetail) {
       const runtime = await getWebRuntime();
       const task = await runtime.prisma.investigationTask.findFirst({
-        where: { id: decodeURIComponent(taskDetail[1]!), project: { createdByUserId: runtime.userId } },
-        include: { project: { select: { pathWithNamespace: true } }, errorEvent: { select: { sourceTimestamp: true, logEvidenceJson: true } }, approvals: { select: { decision: true, groupRoleAtApproval: true, approvedAt: true } }, repairRuns: { include: { mergeRequest: true } } },
+        where: { id: decodeURIComponent(taskDetail[1]!), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
+        include: { project: { select: { pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { pathWithNamespace: true } } } }, errorEvent: { select: { sourceTimestamp: true, logEvidenceJson: true } }, approvals: { select: { decision: true, groupRoleAtApproval: true, approvedAt: true } }, repairRuns: { include: { mergeRequest: true } } },
       });
       if (!task) { sendJson(res, 404, { message: "任务不存在" }); return; }
       sendJson(res, 200, {
         id: task.id,
-        project: task.project.pathWithNamespace,
+        project: task.project?.pathWithNamespace ?? task.workspace?.group.fullPath ?? "Group Workspace",
+        repositories: task.repositories.map(({ project }) => project.pathWithNamespace),
         status: task.status,
         priority: task.priority,
         detectedAt: task.errorEvent.sourceTimestamp.toISOString(),
@@ -293,6 +321,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (req.method === "GET" && projectsPath) {
       const runtime = await getWebRuntime();
       sendJson(res, 200, await runtime.gitlab.listProjects(runtime.userId, decodeURIComponent(projectsPath[1]), decodeURIComponent(projectsPath[2])));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/workspaces") {
+      const runtime = await getWebRuntime();
+      const body = await readBody(req);
+      const workspace = await runtime.workspaces.create(runtime.userId, String(body.connectionId ?? ""), String(body.groupId ?? ""));
+      await runtime.workspaces.synchronize(runtime.userId, workspace.id);
+      sendJson(res, 201, { ok: true, workspace, message: "GitLab Group Workspace 已建立，并已同步 Group 与子 Group 的仓库。" });
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/projects") {

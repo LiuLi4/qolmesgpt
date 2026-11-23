@@ -325,3 +325,14 @@ Consumer callbacks
 | NFR-005 | workspace fencing lock; transactional outbox |
 | NFR-006 | SLS Consumer Service; Consumer Group recovery |
 | NFR-007 | ErrorEvent source-position uniqueness; Decision 4 |
+
+## Group Workspace 数据/API 调整（2026-11-23）
+
+以 requirements.md 的 NEED-009、CON-006、DEC-014 及 spec.md 第 12 节为当前范围。旧设计中每项目 checkout 作为仓库执行单元保留；业务 Workspace 和 SLS 改为 Group 范围。
+
+- 新增 GroupWorkspace（每 GitLabGroup 唯一）和 WorkspaceRepository（Workspace/Project 关联）；ProjectWorkspace 继续承载仓库 checkout、分支、互斥锁。已有 checkout 可复用。
+- DataSourceConnection 新增可空 workspaceId，旧 projectId 改为可空；数据库约束要求两者恰有一个。保留旧配置，不擅自合并已在消费的数据源。
+- InvestigationTask 新增 workspaceId 和 TaskRepository 目标关联；组级检测不预设 projectId，调查后校验所有目标均在 Workspace 内。RepairRun 通过 ProjectWorkspace 指向具体仓库。
+- GET GitLab Group 项目支持 includeSubgroups 和分页；POST /api/workspaces 根据用户授权发现全部仓库并初始化/重试 checkout，GET /api/state 返回 Workspace 和逐仓状态。
+- SLS 创建/测试改为接收 workspaceId，验证当前用户对 Workspace 的所有权。后台消费者仍针对每个数据源只消费一次；不会为每个仓库重复消费相同日志。
+- Group Workspace 调查附带仓库清单/只读代码证据；审批绑定调查目标仓库，各仓库执行前重新验证 GitLab 权限和锁。

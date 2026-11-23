@@ -105,39 +105,39 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 - **REQ-001**：系统 MUST 提供 Web UI 作为项目、data source、检测、调查、审批和修复流程的操作入口，不要求用户直接编辑 YAML。
   - Sources: NEED-001
 - **REQ-002**：系统 MUST 为用户提供 GitLab OAuth 2.0 连接流程。
-  - Sources: NEED-002, CON-001, DEC-001, DEC-002
+  - Sources: NEED-009, CON-001, DEC-001, DEC-002
 - **REQ-003**：系统 MUST 为用户提供 PAT 连接流程，并在保存前验证 PAT 的有效性和项目访问能力。
-  - Sources: NEED-002, CON-001, DEC-002
+  - Sources: NEED-009, CON-001, DEC-002
 - **REQ-004**：系统 MUST 按用户保存 GitLab connection，并使用该 connection 的权限获取项目列表。
-  - Sources: NEED-002, DEC-001
+  - Sources: NEED-009, DEC-001
 - **REQ-005**：系统 MUST 只向用户展示其当前 GitLab connection 有权访问的项目。
-  - Sources: NEED-002, DEC-001
-- **REQ-006**：系统 MUST 将选中的 GitLab 项目作为后续 data source、workspace、调查和修复流程的边界。
-  - Sources: NEED-002, NEED-003, CON-003, DEC-001
+  - Sources: NEED-009, DEC-001
+- **REQ-006**：系统 MUST 将选中的 GitLab Group 作为 Workspace、data source 和调查范围，递归纳入子 Group 中所有可访问项目；修复定位到调查识别的具体仓库。
+  - Sources: NEED-009, NEED-009, CON-006, DEC-001
 
 ### 4.2 项目 workspace
 
-- **REQ-007**：系统 MUST 为每个选定项目创建或复用一个持久化的独立 checkout workspace。
-  - Sources: NEED-003, CON-003, DEC-004
-- **REQ-008**：系统 MUST 记录 workspace 的项目关联、路径、Git 状态和可用性状态，使用户能够看到初始化、同步、占用和失败结果。
-  - Sources: NEED-003, CON-003, DEC-004
+- **REQ-007**：系统 MUST 为每个选定 GitLab Group 创建或复用持久化 Group Workspace，并为其中每个项目维护独立 checkout。
+  - Sources: NEED-009, CON-006, DEC-014
+- **REQ-008**：系统 MUST 记录 Workspace 的 Group 关联、递归项目清单及逐仓路径、Git 状态和可用性；仓库新增、移除和初始化失败必须可见。
+  - Sources: NEED-009, CON-006, DEC-014
 - **REQ-009**：系统 MUST 防止并发调查、修复和测试任务覆盖同一项目 checkout 中的文件。
-  - Sources: NEED-003, CON-003, DEC-004
+  - Sources: NEED-009, CON-006, DEC-014
 
 ### 4.3 SLS data source 配置与验证
 
 - **REQ-010**：系统 MUST 将 data source 建模为可扩展的类型和配置接口，并在第一期实现 Alibaba Cloud SLS 类型。
   - Sources: NEED-004, DEC-003
-- **REQ-011**：系统 MUST 允许用户将 SLS data source 关联到一个项目，并配置 SLS Project、Logstore、Endpoint 和访问凭据。
-  - Sources: NEED-005, DEC-003, DEC-005
+- **REQ-011**：系统 MUST 允许用户将 SLS data source 关联到一个 Group Workspace，并配置 SLS Project、Logstore、Endpoint 和访问凭据。
+  - Sources: NEED-009, DEC-003, DEC-005
 - **REQ-012**：系统 MUST 在持久化前加密 SLS 访问凭据，并在读取、API 响应、任务详情和日志中进行脱敏。
   - Sources: CON-002, DEC-005
 - **REQ-013**：系统 MUST 提供独立的 SLS 连接测试和真实日志读取测试，并保存每次测试的结果、时间和错误信息。
-  - Sources: NEED-005, CON-004, DEC-005
+  - Sources: NEED-009, CON-004, DEC-005
 - **REQ-014**：系统 MUST 只有在连接测试和日志读取测试均成功后才允许启用 SLS data source 的持续检测。
-  - Sources: NEED-005, CON-004
+  - Sources: NEED-009, CON-004
 - **REQ-015**：系统 MUST 在 SLS API 返回错误、无权限、配置不存在、读取失败或无匹配日志时，区分失败状态与成功但无数据状态。
-  - Sources: NEED-005, CON-004
+  - Sources: NEED-009, CON-004
 
 ### 4.4 持续检测与 HolmesGPT 调查
 
@@ -145,7 +145,7 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
   - Sources: NEED-006, CON-004
 - **REQ-017**：SLS 适配器 MUST 使用当前适配器的默认错误判定规则识别错误日志：`level >= 50`、`status >= 500`，或 `msg`/`content` 中包含 `error`、`exception`、`failed`、`timeout`、`panic` 等常见错误词；规则必须为后续项目级覆盖保留扩展接口。
   - Sources: NEED-006, DEC-006
-- **REQ-018**：系统 MUST 为检测到的错误创建可追踪的调查任务卡片，并关联项目、data source、原始日志证据和当前检测状态。
+- **REQ-018**：系统 MUST 为检测到的错误创建可追踪的调查任务卡片，并关联 Group Workspace、受影响仓库（定位后）、data source、原始日志证据和当前检测状态。
   - Sources: NEED-006
 - **REQ-019**：系统 MUST 将调查任务提交给 HolmesGPT 调查执行引擎，并将调查状态、结论、错误原因和关联代码上下文回写任务卡片。
   - Sources: NEED-006, NEED-007
@@ -161,11 +161,11 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 - **REQ-023**：系统 MUST 拒绝任何未审批、被拒绝或已撤回审批的代码修改、测试和 MR 创建请求。
   - Sources: NEED-007, CON-005
 - **REQ-024**：系统 MUST 在审批通过后使用该项目的独立 checkout workspace 执行代码修改和验证，并记录执行状态及输出。
-  - Sources: NEED-003, NEED-007, CON-003, CON-005
+  - Sources: NEED-009, NEED-007, CON-006, CON-005
 - **REQ-025**：系统 MUST 在代码修改或验证失败时阻止创建声称已验证的 MR，并在任务卡片中显示失败原因。
   - Sources: NEED-007
 - **REQ-026**：系统 MUST 在代码修改和验证成功后创建 GitLab MR，并将 MR 地址、审批记录、修复变更和验证结果关联到调查任务。
-  - Sources: NEED-007, NEED-002
+  - Sources: NEED-007, NEED-009
 
 ### 4.6 实现边界与交付顺序
 
@@ -195,13 +195,13 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 - **NFR-001**：凭据和敏感仓库信息 MUST 采用加密存储和最小化返回策略；敏感值不得进入提交内容、普通日志或错误报告。
   - Sources: CON-002, DEC-005
 - **NFR-002**：项目 workspace、任务和审批状态 MUST 能被审计地关联到用户、GitLab 项目和时间点。
-  - Sources: NEED-002, NEED-003, NEED-007, CON-003, CON-005
+  - Sources: NEED-009, NEED-009, NEED-007, CON-006, CON-005
 - **NFR-003**：检测、连接测试、调查和修复流程 MUST 对失败状态提供可定位的错误信息，不得将失败显示为成功或无数据。
-  - Sources: NEED-005, NEED-006, NEED-007
+  - Sources: NEED-009, NEED-006, NEED-007
 - **NFR-004**：data source 接口 MUST 允许在不改变项目、workspace、任务和审批核心流程的情况下添加新的 HolmesGPT data source。
   - Sources: NEED-004, DEC-003
 - **NFR-005**：workspace 操作 MUST 具有并发控制，避免同一项目的多个任务产生不可审查的文件覆盖或远程变更。
-  - Sources: NEED-003, CON-003, DEC-004
+  - Sources: NEED-009, CON-006, DEC-014
 - **NFR-006**：SLS 实时消费 MUST 支持断线重连、消费组重平衡、游标恢复和幂等处理，以避免 7×24 检测因短暂故障停止或丢失已接收日志。
   - Sources: NEED-006, DEC-009
 - **NFR-007**：任务创建 MUST 保留每条错误日志的独立证据和任务关联，不能因任务量增长而隐式改变一条日志对应一张任务卡片的规则。
@@ -213,9 +213,9 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 
 - **User**：使用 QolmesGPT 的用户，拥有 GitLab connections、项目访问上下文和审批行为。
 - **GitLabConnection**：用户通过 OAuth 2.0 或 PAT 建立的 GitLab 授权连接，包含实例信息、授权类型、加密凭据和状态。
-- **GitLabProject**：用户从 GitLab 连接可见的项目，作为 workspace 和业务任务的范围。
+- **GitLabProject**：Workspace 中当前连接可访问的独立 Git 仓库，作为代码修改、测试、锁和 MR 的执行范围。
 - **ProjectWorkspace**：一个 GitLab 项目的持久化独立 checkout，包含路径、Git 状态、占用状态和同步结果。
-- **DataSourceConnection**：项目关联的数据源配置；第一期具体类型为 Alibaba Cloud SLS。
+- **DataSourceConnection**：Group Workspace 关联的数据源配置；第一期具体类型为 Alibaba Cloud SLS。
 - **DataSourceVerification**：连接测试和真实日志读取测试的结果记录。
 - **DetectionJob**：针对已验证、已启用 data source 的持续检测执行上下文。
 - **ErrorEvent**：检测到的、符合适配器默认错误规则的日志证据及其项目范围。
@@ -278,22 +278,22 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 | 已确认条目 | 规格覆盖 | 说明 |
 |---|---|---|
 | NEED-001 | REQ-001, SC-001 | Web UI 主流程 |
-| NEED-002 | REQ-002 至 REQ-006, SC-002 | 用户级 GitLab 项目访问 |
-| NEED-003 | REQ-007 至 REQ-009, REQ-024, SC-005 | 项目独立 checkout |
+| NEED-009 | REQ-002 至 REQ-006, SC-002 | 用户级 GitLab 项目访问 |
+| NEED-009 | REQ-007 至 REQ-009, REQ-024, SC-005 | 项目独立 checkout |
 | NEED-004 | REQ-010, NFR-004, OUT-001 | SLS-first 与可扩展数据源 |
-| NEED-005 | REQ-011 至 REQ-015, SC-003 | SLS 配置和读取验证 |
+| NEED-009 | REQ-011 至 REQ-015, SC-003 | SLS 配置和读取验证 |
 | NEED-006 | REQ-016 至 REQ-020, REQ-032 至 REQ-034, NFR-006 至 NFR-007, SC-004, SC-008 | 实时检测与逐条调查任务 |
 | NEED-007 | REQ-019, REQ-021 至 REQ-026, REQ-035 至 REQ-036, SC-005 至 SC-006, SC-009 至 SC-010 | 调查、审批、修复和 MR |
 | NEED-008 | REQ-027 至 REQ-029 | TypeScript、交付顺序和 UI 参考 |
 | CON-001 | REQ-002, REQ-003, DEC-002 | OAuth 与 PAT |
 | CON-002 | REQ-012, NFR-001, SC-007 | 凭据保护 |
-| CON-003 | REQ-006, REQ-008, REQ-009, NFR-002, NFR-005 | 项目边界和并发控制 |
+| CON-006 | REQ-006, REQ-008, REQ-009, NFR-002, NFR-005 | 项目边界和并发控制 |
 | CON-004 | REQ-013 至 REQ-015, REQ-016, SC-003 | 验证后启用检测 |
 | CON-005 | REQ-022, REQ-023, NFR-002, SC-005 | 人工审批门禁 |
 | DEC-001 | REQ-004 至 REQ-006 | 用户级 GitLab connection |
 | DEC-002 | REQ-002, REQ-003 | OAuth 2.0 和 PAT |
 | DEC-003 | REQ-010, REQ-011, REQ-017, NFR-004, OUT-001 | SLS-first |
-| DEC-004 | REQ-007 至 REQ-009, NFR-005, OUT-002 | 持久化 checkout |
+| DEC-014 | REQ-007 至 REQ-009, NFR-005, OUT-002 | 持久化 checkout |
 | DEC-005 | REQ-011 至 REQ-014, NFR-001 | Web 配置和加密保存 |
 | DEC-006 | REQ-017 | 默认错误判定规则 |
 | DEC-007 | REQ-030, REQ-035, GitLabGroupMembership | GitLab Group 权限边界 |
@@ -305,3 +305,21 @@ QolmesGPT 当前可以通过 YAML 配置数据源，但用户希望通过 Web UI
 | DEC-013 | REQ-036, SC-010 | 双重修复验证 |
 | OUT-001 | 第 10 节 | 非 SLS Web 配置不在范围内 |
 | OUT-002 | 第 10 节 | 容器/沙箱不在第一期范围内 |
+
+## 12. Group Workspace 补充验收（2026-11-23）
+
+Sources: NEED-009, CON-006, DEC-014。此节取代先前场景中的单项目 Workspace/数据源绑定表述。
+
+- 选择 Group 后展示其全部可访问项目（递归子 Group，完整分页），无需先选单个项目。
+- 一个 Group 对应一个 Workspace，一个 Workspace 关联该组的仓库清单及共享 SLS；重复同步幂等，不复制数据源或仓库记录。
+- 新增/移除仓库通过同步更新清单；移除不删除代码或历史记录，失败仓库显示具体状态，不得伪报全部就绪。
+- 每条错误创建一张 Workspace 任务，HolmesGPT 获取组内仓库清单和只读证据；输出受影响项目 ID，拒绝 Workspace 外的仓库 ID。
+- 未定位到仓库的调查明确显示未定位并阻止批准修复。跨仓修复按审批中列出的仓库分别获取锁、修改、测试和关联 MR；不能将组范围审批用于未列入的仓库。
+- 仓库同步只允许所选 Group/子 Group 中当前连接有权访问的仓库；API、日志、checkout Git remote 中不得保存明文 Token。
+- 旧单项目数据、任务及审批保留并可查看；新入口以 Group Workspace 为业务范围。
+
+| Confirmed Entry | Spec Requirements | Coverage |
+|---|---|---|
+| NEED-009 | REQ-006, REQ-007, REQ-008, REQ-011, REQ-018, 本节 | Group 和子 Group、共享日志、跨仓调查 |
+| CON-006 | REQ-009, REQ-022 至 REQ-026, REQ-035, 本节 | 独立 checkout、锁、审批、逐仓测试和 MR |
+| DEC-014 | REQ-006 至 REQ-009, REQ-011, 本节 | Group Workspace 与仓库关联 |

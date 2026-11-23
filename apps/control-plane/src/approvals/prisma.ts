@@ -9,7 +9,7 @@ export class PrismaApprovalStore implements ApprovalStore {
       where: { id: taskId },
       select: { id: true, projectId: true, status: true, project: { select: { groupId: true, connectionId: true } } },
     });
-    if (!task) return null;
+    if (!task || !task.project || !task.projectId) return null;
     return { taskId: task.id, projectId: task.projectId, groupId: task.project.groupId, gitLabConnectionId: task.project.connectionId, status: task.status as ApprovalTask["status"] };
   }
 
