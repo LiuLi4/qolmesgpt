@@ -21,10 +21,10 @@ export function normalizeGitLabUrl(value: string): string {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("GitLab instance URL must be an absolute HTTPS URL");
+    throw new Error("GitLab instance URL must be an absolute HTTP or HTTPS URL");
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
-    throw new Error("GitLab instance URL must be an absolute HTTPS URL without credentials or query parameters");
+  if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password || url.search || url.hash) {
+    throw new Error("GitLab instance URL must be an absolute HTTP or HTTPS URL without credentials or query parameters");
   }
   return url.toString().replace(/\/$/, "");
 }

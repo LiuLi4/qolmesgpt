@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryGitLabConnectionStore, MemoryOAuthStateStore } from "../dist/integrations/gitlab/memory.js";
 import { GitLabService } from "../dist/integrations/gitlab/service.js";
+import { normalizeGitLabUrl } from "../dist/integrations/gitlab/crypto.js";
 import { canApproveGitLabRole, mapGitLabRole } from "../dist/integrations/gitlab/roles.js";
 import { GitBeakerApi } from "../dist/integrations/gitlab/gitbeaker.js";
 import type {
@@ -64,6 +65,24 @@ function setup(options: { now?: () => Date; valid?: boolean } = {}) {
   });
   return { service, connections };
 }
+
+test("GitLab instance URLs accept HTTP and HTTPS without embedded credentials", () => {
+  assert.equal(normalizeGitLabUrl("http://git.quantgroup.cn/"), "http://git.quantgroup.cn");
+  assert.equal(normalizeGitLabUrl("https://gitlab.example/"), "https://gitlab.example");
+  assert.throws(() => normalizeGitLabUrl("ftp://gitlab.example"), /HTTP or HTTPS/);
+  assert.throws(() => normalizeGitLabUrl("http://user:password@gitlab.example"), /without credentials/);
+  assert.throws(() => normalizeGitLabUrl("http://gitlab.example?token=secret"), /without credentials or query parameters/);
+});
+
+test("PAT connections can use an HTTP GitLab instance", async () => {
+  const { service, connections } = setup();
+  const connection = await service.connectPAT("user-1", {
+    instanceUrl: "http://git.quantgroup.cn",
+    personalAccessToken: "http-token",
+  });
+  assert.equal(connection.instanceUrl, "http://git.quantgroup.cn");
+  assert.equal(connections.all().length, 1);
+});
 
 test("valid OAuth callback creates an encrypted connection and consumes state once", async () => {
   const { service, connections } = setup();
