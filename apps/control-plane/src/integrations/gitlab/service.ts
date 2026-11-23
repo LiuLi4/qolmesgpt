@@ -55,6 +55,9 @@ export class GitLabService {
   }
 
   async startOAuth(userId: string, input: { instanceUrl: string }): Promise<{ authorizationUrl: string; expiresAt: string }> {
+    if (!this.deps.oauthConfig.clientId.trim()) {
+      throw new Error("GitLab OAuth is not configured. Set GITLAB_OAUTH_CLIENT_ID and register the callback URL in GitLab.");
+    }
     const instanceUrl = normalizeGitLabUrl(input.instanceUrl);
     const state = generateState();
     const verifier = createPkceVerifier();

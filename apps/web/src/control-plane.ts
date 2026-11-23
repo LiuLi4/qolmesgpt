@@ -80,7 +80,7 @@ async function createRuntime(): Promise<WebRuntime> {
     apiFactory: gitBeakerApiFactory,
     oauthClient: new FetchGitLabOAuthClient(),
     oauthConfig: {
-      clientId: process.env.GITLAB_OAUTH_CLIENT_ID ?? "local-web-client",
+      clientId: process.env.GITLAB_OAUTH_CLIENT_ID ?? "",
       clientSecret: process.env.GITLAB_OAUTH_CLIENT_SECRET,
       redirectUri: process.env.GITLAB_OAUTH_REDIRECT_URI ?? "http://127.0.0.1:5050/api/gitlab/oauth/callback",
       scopes: ["api", "read_user"],

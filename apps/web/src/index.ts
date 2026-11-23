@@ -256,6 +256,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
     if (req.method === "GET" && url.pathname === "/api/gitlab/oauth/start") {
+      if (!process.env.GITLAB_OAUTH_CLIENT_ID?.trim()) {
+        const redirectUri = process.env.GITLAB_OAUTH_REDIRECT_URI ?? "http://127.0.0.1:5050/api/gitlab/oauth/callback";
+        sendJson(res, 503, {
+          ok: false,
+          code: "GITLAB_OAUTH_NOT_CONFIGURED",
+          message: `尚未配置 GitLab OAuth 应用。请在 GitLab 用户设置 → 应用（Applications）注册应用，将 Application ID 配置为服务端 GITLAB_OAUTH_CLIENT_ID，回调地址填写 ${redirectUri}。也可先使用 PAT 连接。`,
+          redirectUri,
+        });
+        return;
+      }
       const runtime = await getWebRuntime();
       const instanceUrl = url.searchParams.get("instanceUrl") ?? "https://gitlab.com";
       sendJson(res, 200, await runtime.gitlab.startOAuth(runtime.userId, { instanceUrl }));

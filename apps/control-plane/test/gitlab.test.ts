@@ -66,6 +66,25 @@ function setup(options: { now?: () => Date; valid?: boolean } = {}) {
   return { service, connections };
 }
 
+test("OAuth start fails clearly when the client is not configured", async () => {
+  const unconfigured = new GitLabService({
+    connections: new MemoryGitLabConnectionStore(),
+    oauthStates: new MemoryOAuthStateStore(),
+    apiFactory: { create: (_instanceUrl, token) => new FakeApi(token) },
+    oauthClient: {
+      authorizationUrl: () => "",
+      exchangeCode: async () => ({ accessToken: "token" }),
+    },
+    oauthConfig: { clientId: "", redirectUri: "http://127.0.0.1:5050/api/gitlab/oauth/callback", scopes: ["api"] },
+    cipher,
+    keyVersion: "test",
+  });
+  await assert.rejects(
+    unconfigured.startOAuth("user-1", { instanceUrl: "http://git.quantgroup.cn" }),
+    /GitLab OAuth is not configured.*GITLAB_OAUTH_CLIENT_ID/,
+  );
+});
+
 test("GitLab instance URLs accept HTTP and HTTPS without embedded credentials", () => {
   assert.equal(normalizeGitLabUrl("http://git.quantgroup.cn/"), "http://git.quantgroup.cn");
   assert.equal(normalizeGitLabUrl("https://gitlab.example/"), "https://gitlab.example");
