@@ -128,6 +128,7 @@ async function statePayload() {
       const approval = task.approvals[0];
       return {
         id: task.id,
+        projectId: task.projectId,
         project: task.project?.pathWithNamespace ?? task.workspace?.group.fullPath ?? "Group Workspace",
         repositories: task.repositories.map(({ project }) => project.pathWithNamespace),
         title: `日志错误事件 ${task.errorEvent.logEvidenceJson && typeof task.errorEvent.logEvidenceJson === "object" ? String((task.errorEvent.logEvidenceJson as Record<string, unknown>).msg ?? "需要调查") : "需要调查"}`,
