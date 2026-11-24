@@ -10,24 +10,33 @@ async function openPage(workspaces, sources = [], tasks = []) {
   const storage = new Map();
   let stateCalls = 0;
   const elements = new Map();
+  let taskCards = [];
+  let taskDetailCalls = 0;
   let focused;
   function element(id, dataset = {}) {
     let html = "";
     return { id, dataset, value: "", textContent: "", disabled: false, hidden: false, open: false, style: {}, listeners: {},
       classList: { add() {}, remove() {}, toggle() {} },
-      addEventListener(event, callback) { this.listeners[event] = callback; },
-      click() { if (!this.disabled) this.listeners.click?.call(this); },
-      input(value) { this.value = value; this.listeners.input?.call(this); },
-      change(value) { this.value = value; this.listeners.change?.call(this); },
+      addEventListener(event, callback) { (this.listeners[event] ??= []).push(callback); },
+      dispatch(type, event = {}) { event.preventDefault ??= () => {}; for (const callback of this.listeners[type] ?? []) callback.call(this, event); this.parent?.dispatch(type, event); },
+      click() { if (!this.disabled) this.dispatch("click"); },
+      input(value) { this.value = value; this.dispatch("input"); },
+      change(value) { this.value = value; this.dispatch("change"); },
       showModal() { this.open = true; },
-      close() { this.open = false; this.listeners.close?.call(this); },
+      close() { this.open = false; this.dispatch("close"); },
       setAttribute(name, value) { this[name] = value; },
       focus() { focused = id; },
       get innerHTML() { return html; },
-      set innerHTML(value) { html = value; if (["active-workspace", "sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? ""; },
+      set innerHTML(value) {
+        html = value;
+        if (["active-workspace", "sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? "";
+        if (id === "task-list") taskCards = [...value.matchAll(/<article[^>]*data-task="([^"]+)"/g)].map(([, task]) => element(`card-${task}`, { task }));
+      },
     };
   }
   for (const [, id] of page.matchAll(/id="([^"]+)"/g)) elements.set(id, element(id));
+  elements.get("close-task-detail").parent = elements.get("task-detail");
+  elements.get("retry-investigation").parent = elements.get("task-detail");
   elements.get("gitlab-auth-method") && (elements.get("gitlab-auth-method").value = "pat");
   const nav = ["overview", "projects", "sources", "tasks", "approvals"].map((view) => element(`nav-${view}`, { view }));
   const location = { hash: "#projects" };
@@ -41,6 +50,8 @@ async function openPage(workspaces, sources = [], tasks = []) {
     querySelectorAll(selector) {
       if (selector === ".nav button") return nav;
       if (selector === ".view") return nav.map((item) => elements.get(item.dataset.view)).filter(Boolean);
+      if (selector === "#task-list [data-task]") return taskCards;
+      if (selector === "[data-task]") return [...taskCards, ...(elements.get("task-detail").dataset.task ? [elements.get("task-detail")] : [])];
       return [];
     },
   };
@@ -55,11 +66,16 @@ async function openPage(workspaces, sources = [], tasks = []) {
       if (url.endsWith("/groups")) return response({ items: [{ id: "group", fullPath: "acme/platform", role: "MAINTAINER" }] });
       if (url === "/api/workspaces") { createCalls++; return new Promise((resolve) => { pendingCreate = resolve; }); }
       if (url === "/api/sls/verify") { slsRequests.push(JSON.parse(options.body)); return new Promise((resolve) => { pendingSls = resolve; }); }
+      if (url.startsWith("/api/tasks/")) {
+        taskDetailCalls++;
+        return response({ ...state.tasks.find((task) => url === `/api/tasks/${task.id}`), approvals: [], groupedLogs: [] });
+      }
       throw new Error(`Unexpected fixture request: ${url}`);
     },
   });
   await setImmediate();
   return { elements, location, slsRequests, get stateCalls() { return stateCalls; },
+    get taskCards() { return taskCards; }, get taskDetailCalls() { return taskDetailCalls; },
     update(next) { state = { ...state, ...next }; },
     async tick() { intervals.forEach((callback) => callback()); await setImmediate(); },
     get focused() { return focused; }, get createCalls() { return createCalls; },
@@ -222,4 +238,29 @@ test("automatic refresh preserves unsaved SLS fields and credentials", async () 
   assert.equal(ui.elements.get("sls-logstore").value, "unsaved-logstore");
   assert.equal(ui.elements.get("sls-access-key-secret").value, "fixture-secret");
   assert.equal(ui.elements.get("save-sls").disabled, false);
+});
+
+test("task detail stays closed after polling and can be reopened without dialog click or keyboard handlers", async () => {
+  const task = { id: "task-1", workspaceId: "ready", title: "Request error", status: "AWAITING_APPROVAL", occurrenceCount: 4, requestCount: 2 };
+  const ui = await openPage([workspace("ready")], [], [task]);
+  const dialog = ui.elements.get("task-detail");
+  const close = ui.elements.get("close-task-detail");
+  for (let cycle = 0; cycle < 2; cycle++) {
+    ui.taskCards[0].click();
+    await setImmediate();
+    assert.equal(dialog.open, true);
+    assert.match(ui.elements.get("task-detail-content").textContent, /错误日志 4 条 · 请求 2 次/);
+    await ui.tick();
+    await ui.tick();
+    const reads = ui.taskDetailCalls;
+    close.click();
+    await setImmediate();
+    assert.equal(dialog.open, false, "closing must not bubble into an open-task handler on the dialog");
+    assert.equal(ui.taskDetailCalls, reads, "closing must not fetch and reopen the same task");
+    close.dispatch("keydown", { key: "Enter" });
+    assert.equal(dialog.open, false, "keyboard events inside a closed dialog must not reopen it");
+    await ui.tick();
+    assert.equal(dialog.open, false);
+    assert.equal(ui.taskDetailCalls, reads);
+  }
 });
