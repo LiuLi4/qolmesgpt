@@ -264,3 +264,12 @@ test("task detail stays closed after polling and can be reopened without dialog 
     assert.equal(ui.taskDetailCalls, reads);
   }
 });
+
+test("workspace and log source selectors share the top context and show live log details", () => {
+  assert.match(page, /class="workspace-context"/);
+  assert.match(page, /id="active-workspace" aria-label="切换 Workspace"/);
+  assert.match(page, /id="source-switcher"/);
+  assert.match(page, /id="monitor-source" aria-label="切换日志数据源"/);
+  assert.match(page, /当前日志实时详情/);
+  assert.match(page, /原始日志保留在阿里云 SLS；错误日志与调查结果保存到系统数据库/);
+});
