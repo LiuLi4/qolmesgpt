@@ -5,8 +5,10 @@ cd "$(dirname "$0")/.."
 : "${DATABASE_URL:?Set DATABASE_URL before starting investigations}"
 export QOLMESGPT_WORKSPACE_ROOT="${QOLMESGPT_WORKSPACE_ROOT:-$PWD/apps/web/.qolmesgpt-workspaces}"
 server_pid=""
+worker_pid=""
 config_directory=""
 cleanup() {
+  if [[ -n "$worker_pid" ]]; then kill "$worker_pid" 2>/dev/null || true; wait "$worker_pid" 2>/dev/null || true; fi
   if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; fi
   if [[ -n "$config_directory" ]]; then rm -rf -- "$config_directory"; fi
 }
@@ -14,16 +16,26 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 if [[ -z "${HOLMESGPT_URL:-}" ]]; then
-  : "${MODEL:?Set MODEL, e.g. openai/anthropic/claude-sonnet-4.5 for OpenRouter}"
-  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
-    export API_KEY="$OPENROUTER_API_KEY"
-    export API_BASE="${API_BASE:-https://openrouter.ai/api/v1}"
+  # Optional trusted local shell file. Never copy it into the repository.
+  model_env_file="${QOLMESGPT_MODEL_ENV_FILE:-$HOME/.config/qolmesgpt/holmes-investigation/yuanxi.env}"
+  if [[ -f "$model_env_file" ]]; then
+    set -a
+    source "$model_env_file"
+    set +a
+  elif [[ -n "${QOLMESGPT_MODEL_ENV_FILE:-}" ]]; then
+    echo "QOLMESGPT_MODEL_ENV_FILE does not exist" >&2
+    exit 1
   fi
-  export API_KEY="${API_KEY:-${OPENAI_API_KEY:-${ANTHROPIC_API_KEY:-}}}"
-  : "${API_KEY:?Configure a valid model API key locally}"
+  source scripts/investigation-model.sh
+  resolve_investigation_model
+  if [[ -n "${YUANXI_API_KEY:-}" ]]; then
+    node scripts/check-investigation-model.mjs
+  fi
   python_bin="${HOLMES_PYTHON:-$PWD/.venv/bin/python}"
   config_directory="$(mktemp -d "${TMPDIR:-/tmp}/qolmesgpt-holmes.XXXXXXXX")"
   export HOLMES_CONFIGPATH_DIR="$config_directory"
+  # An inherited registry must not silently select a different provider/model.
+  export MODEL_LIST_FILE_LOCATION="$config_directory/model_list.yaml"
   export HOLMESGPT_API_KEY="${HOLMESGPT_API_KEY:-$("$python_bin" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
   export HOLMES_API_KEY="$HOLMESGPT_API_KEY"
   export HOLMESGPT_URL="http://127.0.0.1:${QOLMESGPT_HOLMES_PORT:-5051}"
@@ -58,4 +70,6 @@ fi
 # Do not print configuration or credentials. HolmesGPT logs are restricted to warnings.
 echo "Investigation worker connecting to $HOLMESGPT_URL"
 cd apps/workers
-node dist/investigation/main.js
+node dist/investigation/main.js &
+worker_pid=$!
+wait "$worker_pid"

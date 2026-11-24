@@ -26,11 +26,19 @@ pnpm --filter @qolmesgpt/control-plane db:generate
 pnpm --filter @qolmesgpt/control-plane exec prisma migrate deploy
 pnpm build
 # DATABASE_URL、有效模型凭据在本机环境变量中配置，不写入仓库。
-# OpenRouter 使用 OPENROUTER_API_KEY，并指定 OpenAI 兼容模型名称：
-export MODEL=openai/anthropic/claude-sonnet-4.5
+# 公司源曦网关：复制模板，在本机文件中填写 Key 和模型广场的完整模型 ID。
+mkdir -p ~/.config/qolmesgpt/holmes-investigation
+cp -n scripts/yuanxi.env.example ~/.config/qolmesgpt/holmes-investigation/yuanxi.env
+chmod 600 ~/.config/qolmesgpt/holmes-investigation/yuanxi.env
 # 若当前 checkout 没有 .venv，设置 HOLMES_PYTHON 指向已安装 Holmes 依赖的 Python。
 ./scripts/run-local-investigations.sh
 ```
+
+公司 API 文档：<https://yuanxi.xrtan.cn/user/docs?doc=api>。Base URL 为 `https://yuanxi.xrtan.cn/yuanxi/v1`，请求地址为其后的 `/chat/completions`，不重复拼接 `/v1`。源曦 Key 在公司平台的 Key 管理页面创建，模型 ID 从模型广场复制；选用支持 OpenAI Chat Completions 和严格 JSON Schema 输出的模型。配置文件包含 `YUANXI_BASE_URL`、`YUANXI_API_KEY` 和 `YUANXI_MODEL`，其中模型 ID 保留平台的完整原值，启动脚本自动添加 LiteLLM 路由所需的 `openai/` 前缀。
+
+启动先执行公司 `/key-check`，鉴权失败即退出，避免无效 Key 继续领取调查任务。公司配置优先于继承的 `OPENROUTER_API_KEY` 等变量，三项必须同时提供；不会自动回退到其他服务。可用 `QOLMESGPT_MODEL_ENV_FILE` 指定另一份本机可信 shell 配置文件。配置修改后需重启调查脚本，再在任务详情点击“重新调查”；原 SLS 消费和 Web 服务可保持运行。
+
+其他服务可通过 `MODEL`、`API_BASE`、`API_KEY` 显式配置；也支持 `OPENAI_API_KEY`、`ANTHROPIC_API_KEY`，以及 `MODEL=openrouter/...` 配合 `OPENROUTER_API_KEY`。使用其他服务时，将 `QOLMESGPT_MODEL_ENV_FILE` 指向对应环境文件，避免加载默认公司配置。显式 Key 不再被继承的 OpenRouter Key 覆盖。已有 OpenRouter-only 环境且没有自定义 `API_BASE` 时仍兼容原配置。
 
 可设置 `HOLMESGPT_URL`、`HOLMESGPT_API_KEY` 连接已有 Holmes 服务；它必须限制在受信任的只读工具和当前 Workspace 的权限范围内。`QOLMESGPT_WORKSPACE_ROOT` 指向 Web 服务使用的同一个 checkout 根目录。生产必须设置相同的 `QOLMESGPT_CREDENTIAL_KEY_BASE64` 和密钥版本，不能生成另一套密钥。
 

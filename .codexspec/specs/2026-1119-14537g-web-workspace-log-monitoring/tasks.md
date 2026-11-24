@@ -251,3 +251,10 @@ All testable tasks include individually traceable Test Scenarios. No task is out
 - build/lint/typecheck、Prisma schema validation、67 个测试通过（数据库测试使用独立 schema，未跳过）。
 - 原有 39 张待调查卡片归并为 7 张，保留全部事件；真实请求补查得到 55 条同请求日志，检索 10 个仓库。后续新错误正常新增任务。
 - 真实模型根因验收仍未通过：当前 OPENROUTER_API_KEY 被 OpenRouter 拒绝为无效 Key（401）。不得标记真实模型调查或修复验收成功。
+
+### 2026-11-24 公司模型网关接入
+
+- 按用户指定源曦 API 文档复用已有 LiteLLM 的 OpenAI 兼容接口，不新增 SDK 或网关依赖。
+- 支持本机 `YUANXI_BASE_URL`、`YUANXI_API_KEY`、`YUANXI_MODEL` 配置；公司配置统一覆盖继承的旧服务设置，启动先 `/key-check`，失败不领取调查任务。修复显式 API Key 被 OPENROUTER_API_KEY 覆盖的问题。
+- 已确认 Base URL 为 `https://yuanxi.xrtan.cn/yuanxi/v1`。现有本机 Key 在公司 `/key-check` 仍返回 401；真实模型调查验收需等待有效源曦 Key 和模型 ID，不得以模拟输出代替。
+- build/lint/typecheck、shell/JavaScript 语法检查和全部 75 项测试通过（新增 8 项模型配置与鉴权检查测试，数据库测试未跳过）。本机新启动流程验证配置缺失即退出；旧无效 OpenRouter 调查进程已停止，Web 与 SLS 消费仍运行。
