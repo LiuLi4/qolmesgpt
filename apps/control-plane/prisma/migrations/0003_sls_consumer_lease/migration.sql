@@ -1,0 +1,1 @@
+ALTER TABLE "SLSConsumerState" ADD COLUMN "leaseExpiresAt" TIMESTAMPTZ(6);

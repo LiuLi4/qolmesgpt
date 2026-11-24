@@ -176,3 +176,13 @@ config_toolsets.yaml
 .claude-trace/
 eval_results.json
 uv.lock
+
+# TypeScript workspace outputs
+.pnpm-store/
+node_modules/
+dist/
+*.tsbuildinfo
+apps/control-plane/src/generated/
+
+# Private runtime repository checkouts
+apps/web/.qolmesgpt-workspaces/

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16.6
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qolmesgpt
+      POSTGRES_USER: qolmesgpt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qolmesgpt-dev-only}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - qolmesgpt-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qolmesgpt -d qolmesgpt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  qolmesgpt-postgres:
