@@ -2,27 +2,17 @@ import { execFile } from "node:child_process";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { devNull } from "node:os";
+import { repositoryIdentity } from "./remotes.js";
 import type { GitRunner, WorkspaceLease, WorkspaceProject, WorkspaceRecord, WorkspaceStore } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
 export class NodeGitRunner implements GitRunner {
   async run(args: readonly string[], cwd: string): Promise<string> {
-    const result = await execFileAsync("git", [...args], { cwd, maxBuffer: 1024 * 1024 });
+    const result = await execFileAsync("git", [...args], { cwd, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_CONFIG_GLOBAL: devNull } });
     return result.stdout.trim();
   }
-}
-
-function normalizeRemote(value: string): string {
-  const trimmed = value.trim().replace(/\/$/, "").replace(/\.git$/, "");
-  if (!trimmed) throw new Error("GitLab remote URL is required");
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    const url = new URL(trimmed);
-    if (url.username || url.password || url.search || url.hash) throw new Error("GitLab remote URL cannot contain credentials or query parameters");
-    return `${url.protocol}//${url.host}${url.pathname}`.replace(/\/$/, "").toLowerCase();
-  }
-  if (/^[^\s@]+@[^\s:]+:[^\s]+$/.test(trimmed)) return trimmed.toLowerCase();
-  throw new Error("GitLab remote URL must be HTTPS or SSH");
 }
 
 export class WorkspaceManager {
@@ -35,17 +25,17 @@ export class WorkspaceManager {
   ) {}
 
   async ensureWorkspace(project: WorkspaceProject): Promise<{ record: WorkspaceRecord; absolutePath: string }> {
-    const remoteUrl = normalizeRemote(project.remoteUrl);
+    const remoteIdentity = repositoryIdentity(project.remoteUrl);
     const absolutePath = await this.safePath(project.relativePath);
     const existing = await this.store.findByProjectId(project.projectId);
     if (existing) {
-      if (normalizeRemote(existing.remoteUrl) !== remoteUrl || existing.relativePath !== project.relativePath) {
+      if (repositoryIdentity(existing.remoteUrl) !== remoteIdentity || existing.relativePath !== project.relativePath) {
         await this.store.update(project.projectId, { status: "FAILED" });
         throw new Error("Workspace remote or path does not match the selected GitLab project");
       }
       try {
-        const actualRemote = normalizeRemote(await this.git.run(["remote", "get-url", "origin"], absolutePath));
-        if (actualRemote !== remoteUrl) throw new Error("Workspace origin remote does not match the selected GitLab project");
+        const actualRemote = repositoryIdentity(await this.git.run(["config", "--get", "remote.origin.url"], absolutePath));
+        if (actualRemote !== remoteIdentity) throw new Error("Workspace origin remote does not match the selected GitLab project");
         const headSha = await this.git.run(["rev-parse", "HEAD"], absolutePath);
         const branch = await this.git.run(["branch", "--show-current"], absolutePath);
         const record = await this.store.update(project.projectId, { headSha, branch: branch || project.defaultBranch, status: "READY" });
@@ -58,7 +48,7 @@ export class WorkspaceManager {
 
     await mkdir(dirname(absolutePath), { recursive: true });
     try {
-      await this.store.create({ projectId: project.projectId, remoteUrl, relativePath: project.relativePath, headSha: null, branch: project.defaultBranch, status: "INITIALIZING", lockOwner: null, lockExpiresAt: null, fencingToken: 0n });
+      await this.store.create({ projectId: project.projectId, remoteUrl: project.remoteUrl, relativePath: project.relativePath, headSha: null, branch: project.defaultBranch, status: "INITIALIZING", lockOwner: null, lockExpiresAt: null, fencingToken: 0n });
       await this.git.run(["clone", "--branch", project.defaultBranch, "--single-branch", project.remoteUrl, absolutePath], dirname(absolutePath));
       const headSha = await this.git.run(["rev-parse", "HEAD"], absolutePath);
       const record = await this.store.update(project.projectId, { headSha, branch: project.defaultBranch, status: "READY" });
@@ -72,7 +62,7 @@ export class WorkspaceManager {
   async sync(projectId: string, expectedRemoteUrl: string, branch: string): Promise<WorkspaceRecord> {
     const record = await this.requireRecord(projectId);
     const absolutePath = await this.safePath(record.relativePath);
-    if (normalizeRemote(record.remoteUrl) !== normalizeRemote(expectedRemoteUrl)) throw new Error("Workspace remote does not match the selected project");
+    if (repositoryIdentity(record.remoteUrl) !== repositoryIdentity(expectedRemoteUrl)) throw new Error("Workspace remote does not match the selected project");
     const status = await this.git.run(["status", "--porcelain"], absolutePath);
     if (status) {
       await this.store.update(projectId, { status: "DIRTY" });

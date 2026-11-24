@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process";
+import { GitRepositoryCheckout } from "@qolmesgpt/control-plane";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { lstat, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { promisify } from "node:util";
+import { resolve } from "node:path";
 import { page } from "./ui.js";
 import { closeWebRuntime, getWebRuntime } from "./control-plane.js";
 
 const port = Number(process.env.PORT ?? 5050);
 const host = process.env.HOST ?? "127.0.0.1";
-const execFileAsync = promisify(execFile);
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   const body = JSON.stringify(payload);
@@ -160,14 +157,6 @@ async function cloneSelectedProject(runtime: Awaited<ReturnType<typeof getWebRun
   });
   const root = resolve(process.env.QOLMESGPT_WORKSPACE_ROOT ?? resolve(process.cwd(), ".qolmesgpt-workspaces"));
   const relativePath = `projects/${project.id}`;
-  const absolutePath = resolve(root, relativePath);
-  const contained = relative(root, absolutePath);
-  if (isAbsolute(contained) || contained.startsWith("..")) throw new Error("Workspace path escapes the workspace root");
-  const existing = await runtime.prisma.projectWorkspace.findUnique({ where: { projectId: project.id } });
-  if (existing?.status === "READY") return { project, workspace: existing };
-  await mkdir(dirname(absolutePath), { recursive: true });
-  const rootStat = await lstat(root).catch(() => null);
-  if (rootStat?.isSymbolicLink()) throw new Error("Workspace root cannot be a symlink");
   const token = await runtime.gitlab.getAccessToken(runtime.userId, input.connectionId);
   const remoteUrl = `${selected.webUrl.replace(/\/$/, "")}.git`;
   try {
@@ -176,13 +165,8 @@ async function cloneSelectedProject(runtime: Awaited<ReturnType<typeof getWebRun
       create: { projectId: project.id, relativePath, branch: selected.defaultBranch, status: "INITIALIZING" },
       update: { relativePath, branch: selected.defaultBranch, status: "INITIALIZING" },
     });
-    await execFileAsync("git", ["clone", "--branch", selected.defaultBranch, "--single-branch", remoteUrl, absolutePath], {
-      cwd: dirname(absolutePath),
-      maxBuffer: 1024 * 1024,
-      env: { ...process.env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraHeader", GIT_CONFIG_VALUE_0: `PRIVATE-TOKEN: ${token}` },
-    });
-    const head = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: absolutePath, maxBuffer: 1024 * 1024 });
-    const workspace = await runtime.prisma.projectWorkspace.update({ where: { projectId: project.id }, data: { status: "READY", headSha: head.stdout.trim() } });
+    const checkout = await new GitRepositoryCheckout(root).prepare({ relativePath, remoteUrl, branch: selected.defaultBranch, token });
+    const workspace = await runtime.prisma.projectWorkspace.update({ where: { projectId: project.id }, data: { ...checkout, errorMessage: checkout.status === "DIRTY" ? "Repository contains uncommitted changes" : null } });
     return { project, workspace };
   } catch (error) {
     await runtime.prisma.projectWorkspace.update({ where: { projectId: project.id }, data: { status: "FAILED" } }).catch(() => undefined);

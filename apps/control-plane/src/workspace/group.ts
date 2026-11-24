@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
+import { devNull } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import type { GitLabService } from "../integrations/gitlab/service.js";
+import { repositoryIdentity } from "./remotes.js";
 
 const exec = promisify(execFile);
 
@@ -34,17 +36,19 @@ export class GitRepositoryCheckout implements RepositoryCheckout {
     await mkdir(dirname(path), { recursive: true });
     const remote = new URL(input.remoteUrl);
     if (!["http:", "https:"].includes(remote.protocol) || remote.username || remote.password || remote.search || remote.hash) throw new Error("Invalid GitLab repository URL");
+    // Service checkouts use their configured transport, not a developer's global URL rewrites.
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_TERMINAL_PROMPT: "0" };
     const exists = await lstat(path).catch(() => null);
     if (!exists) {
       await exec("git", ["clone", "--depth", "1", "--branch", input.branch, "--single-branch", input.remoteUrl, path], {
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `http.${remote.origin}/.extraHeader`, GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`oauth2:${input.token}`).toString("base64")}` },
+        env: { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `http.${remote.origin}/.extraHeader`, GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`oauth2:${input.token}`).toString("base64")}` },
       });
     }
-    const run = async (args: string[]) => (await exec("git", args, { cwd: path, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
-    const actual = await run(["remote", "get-url", "origin"]);
-    if (actual.replace(/\.git$/, "") !== input.remoteUrl.replace(/\.git$/, "")) throw new Error("Workspace origin does not match the selected repository");
+    const run = async (args: string[]) => (await exec("git", args, { cwd: path, env, timeout: 30_000, maxBuffer: 1024 * 1024 })).stdout.trim();
+    const actual = await run(["config", "--get", "remote.origin.url"]);
+    if (repositoryIdentity(actual) !== repositoryIdentity(input.remoteUrl)) throw new Error("Workspace origin does not match the selected repository");
     const dirty = await run(["status", "--porcelain"]);
     return { headSha: await run(["rev-parse", "HEAD"]), branch: await run(["branch", "--show-current"]), status: dirty ? "DIRTY" as const : "READY" as const };
   }

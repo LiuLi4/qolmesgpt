@@ -10,7 +10,7 @@ import type { GitRunner } from "../dist/workspace/types.js";
 class FakeGit implements GitRunner {
   readonly calls: string[][] = [];
   readonly outputs: Record<string, string> = {
-    "remote get-url origin": "https://gitlab.example/acme/service.git",
+    "config --get remote.origin.url": "https://gitlab.example/acme/service.git",
     "rev-parse HEAD": "abc123",
     "branch --show-current": "main",
     "status --porcelain": "",
@@ -50,6 +50,19 @@ test("rejects traversal and symlink workspace paths", async (t) => {
   t.after(() => rm(outside, { recursive: true, force: true }));
   await symlink(outside, join(root, "linked"));
   await assert.rejects(manager.workspacePath("linked/project"), /symlink/);
+});
+
+test("project checkout reuses equivalent SSH origins but rejects a different repository", async (t) => {
+  const { root, manager, git } = await setup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = { projectId: "project-1", remoteUrl: "http://gitlab.example/acme/service.git", defaultBranch: "main", relativePath: "projects/project-1" };
+  await manager.ensureWorkspace(project);
+  for (const remote of ["git@gitlab.example:acme/service.git", "ssh://git@gitlab.example/acme/service.git"]) {
+    git.outputs["config --get remote.origin.url"] = remote;
+    assert.equal((await manager.ensureWorkspace(project)).record.status, "READY");
+  }
+  git.outputs["config --get remote.origin.url"] = "git@gitlab.example:acme/other.git";
+  await assert.rejects(manager.ensureWorkspace(project), /origin remote does not match/);
 });
 
 test("serializes concurrent locks and rejects stale fencing tokens", async (t) => {
