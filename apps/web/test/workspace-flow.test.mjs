@@ -10,17 +10,21 @@ async function openPage(workspaces, sources = []) {
   let focused;
   function element(id, dataset = {}) {
     let html = "";
-    return { id, dataset, value: "", textContent: "", disabled: false, style: {}, listeners: {},
+    return { id, dataset, value: "", textContent: "", disabled: false, hidden: false, open: false, style: {}, listeners: {},
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(event, callback) { this.listeners[event] = callback; },
       click() { if (!this.disabled) this.listeners.click?.call(this); },
       input(value) { this.value = value; this.listeners.input?.call(this); },
+      change(value) { this.value = value; this.listeners.change?.call(this); },
+      showModal() { this.open = true; },
+      close() { this.open = false; this.listeners.close?.call(this); },
       focus() { focused = id; },
       get innerHTML() { return html; },
       set innerHTML(value) { html = value; if (["sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? ""; },
     };
   }
   for (const [, id] of page.matchAll(/id="([^"]+)"/g)) elements.set(id, element(id));
+  elements.get("gitlab-auth-method") && (elements.get("gitlab-auth-method").value = "pat");
   const nav = ["overview", "projects", "sources", "tasks", "approvals"].map((view) => element(`nav-${view}`, { view }));
   const location = { hash: "#projects" };
   let pendingCreate;
@@ -65,11 +69,12 @@ async function openPage(workspaces, sources = []) {
 
 function workspace(id, status = "READY") { return { id, group: `acme/${id}`, relativePath: `groups/${id}`, status, repositories: [{ pathWithNamespace: `acme/${id}/api`, status }], errorMessage: status === "FAILED" ? "1 repository checkout requires attention" : null }; }
 
-test("successful creation advances to sources with the created workspace selected, including multiple workspaces", async () => {
+test("successful creation reports its result in the dialog and continues to the selected source workspace", async () => {
   const first = workspace("first");
   const second = workspace("second");
   const ui = await openPage([first], [{ workspaceId: first.id, project: "first-logs", logstore: "first-store", endpoint: "https://cn-shanghai.log.aliyuncs.com", status: "ENABLED" }]);
   const button = ui.elements.get("create-workspace");
+  ui.elements.get("new-workspace").click();
   button.click();
   button.click();
   assert.equal(button.disabled, true);
@@ -77,6 +82,10 @@ test("successful creation advances to sources with the created workspace selecte
   // The creation response can precede synchronization; the refreshed state is authoritative.
   ui.completeCreate({ ...second, status: "INITIALIZING" }, [first, second]);
   await setImmediate();
+  assert.equal(ui.elements.get("workspace-dialog").open, true);
+  assert.match(ui.elements.get("gitlab-result").textContent, /已就绪/);
+  ui.elements.get("continue-workspace").click();
+  assert.equal(ui.elements.get("workspace-dialog").open, false);
   assert.equal(ui.location.hash, "#sources");
   assert.equal(ui.elements.get("sls-workspace-id").value, second.id);
   assert.equal(ui.elements.get("sls-project").value, "pyxis-telemetry-log");
@@ -88,12 +97,36 @@ test("failed synchronization stays on projects, reports the failure and restores
   const failed = workspace("failed", "FAILED");
   const ui = await openPage([]);
   const button = ui.elements.get("create-workspace");
+  ui.elements.get("new-workspace").click();
   button.click();
   ui.completeCreate(failed, [failed]);
   await setImmediate();
   assert.equal(ui.location.hash, "#projects");
   assert.match(ui.elements.get("gitlab-result").textContent, /1 repository checkout requires attention/);
+  assert.equal(ui.elements.get("workspace-dialog").open, true);
   assert.equal(button.disabled, false);
+});
+
+test("workspace creation is hidden until requested and authentication methods are mutually exclusive", async () => {
+  const ui = await openPage([workspace("ready")]);
+  const dialog = ui.elements.get("workspace-dialog");
+  assert.equal(dialog.open, false);
+  assert.match(ui.elements.get("workspace-list").innerHTML, /acme\/ready/);
+  assert.equal(ui.elements.get("new-workspace").hidden, false);
+  ui.elements.get("new-workspace").click();
+  assert.equal(dialog.open, true);
+  assert.equal(ui.elements.get("gitlab-pat-field").hidden, false);
+  ui.elements.get("gitlab-auth-method").change("oauth");
+  assert.equal(ui.elements.get("gitlab-pat-field").hidden, true);
+  assert.equal(ui.elements.get("connect-gitlab").textContent, "使用 OAuth 连接");
+  ui.elements.get("gitlab-auth-method").change("pat");
+  assert.equal(ui.elements.get("gitlab-pat-field").hidden, false);
+  assert.equal(ui.elements.get("connect-gitlab").textContent, "使用 PAT 连接");
+  ui.elements.get("gitlab-pat").input("fixture-token");
+  ui.elements.get("close-workspace-dialog").click();
+  assert.equal(dialog.open, false);
+  assert.equal(ui.elements.get("gitlab-pat").value, "");
+  assert.equal(ui.focused, "new-workspace");
 });
 
 test("an existing ready workspace offers a direct next step while a failed workspace does not", async () => {
