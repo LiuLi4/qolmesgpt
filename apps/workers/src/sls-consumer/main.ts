@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { createSlsDetectionRuntime } from "@qolmesgpt/control-plane";
 import { runSlsWorker } from "./worker.js";
 
-const runtime = createSlsDetectionRuntime();
+const runtime = await createSlsDetectionRuntime();
 const controller = new AbortController();
 process.once("SIGINT", () => controller.abort());
 process.once("SIGTERM", () => controller.abort());

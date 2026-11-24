@@ -86,6 +86,9 @@ async function statePayload() {
       consumerGroup: source.consumerState?.consumerGroup ?? String(config.consumerGroup ?? ""),
       status: source.status,
       consumerStatus: source.consumerState?.status ?? "STOPPED",
+      lastHeartbeatAt: source.consumerState?.lastHeartbeatAt?.toISOString() ?? null,
+      consumerErrorCode: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.errorCode ?? null,
+      lagging: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.lagging ?? null,
     };
   })), ...groupWorkspaces.flatMap((workspace) => workspace.dataSources.map((source) => ({
     id: source.id,
@@ -98,6 +101,9 @@ async function statePayload() {
     consumerGroup: source.consumerState?.consumerGroup ?? String((source.configJson as Record<string, unknown>).consumerGroup ?? ""),
     status: source.status,
     consumerStatus: source.consumerState?.status ?? "STOPPED",
+    lastHeartbeatAt: source.consumerState?.lastHeartbeatAt?.toISOString() ?? null,
+    consumerErrorCode: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.errorCode ?? null,
+    lagging: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.lagging ?? null,
   })))];
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const errorCount = await runtime.prisma.errorEvent.count({ where: { sourceTimestamp: { gte: cutoff }, dataSourceConnection: { OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] } } });

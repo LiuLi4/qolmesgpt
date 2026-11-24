@@ -145,3 +145,19 @@ test("persisted configuration reloads as saved, and edits require another succes
   assert.match(ui.elements.get("source-result").textContent, /读取测试未通过/);
   assert.equal(ui.elements.get("source-status").textContent, "测试失败");
 });
+
+test("saved configuration reports consumer failure separately and offers investigation tasks", async () => {
+  const ui = await openPage([workspace("ready")], [{ ...source(), consumerStatus: "FAILED", consumerErrorCode: "INVALID_CREDENTIAL_CONFIG" }]);
+  assert.match(ui.elements.get("detection-detail").textContent, /检测失败.*INVALID_CREDENTIAL_CONFIG/);
+  assert.equal(ui.elements.get("save-sls").textContent, "已保存");
+  ui.elements.get("view-sls-tasks").click();
+  assert.equal(ui.location.hash, "#tasks");
+});
+
+test("running detection requires a recent heartbeat and reports checkpoint catch-up", async () => {
+  const running = { ...source(), consumerStatus: "RUNNING", lastHeartbeatAt: new Date().toISOString(), lagging: false };
+  const ui = await openPage([workspace("ready")], [running]);
+  assert.match(ui.elements.get("detection-detail").textContent, /正在检测.*已追平/);
+  const stale = await openPage([workspace("ready")], [{ ...running, lastHeartbeatAt: new Date(Date.now() - 120_000).toISOString() }]);
+  assert.match(stale.elements.get("detection-detail").textContent, /心跳已过期/);
+});

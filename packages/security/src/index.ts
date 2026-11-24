@@ -4,5 +4,6 @@ export function redactSecret(value: string): string {
 }
 
 export * from "./encryption.js";
+export * from "./credential-key.js";
 export * from "./redaction.js";
 export * from "./execution.js";

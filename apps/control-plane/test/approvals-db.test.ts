@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "../dist/generated/prisma/client.js";
+import { isolatedDatabase } from "./database-fixture.ts";
 import { PrismaApprovalStore } from "../dist/approvals/prisma.js";
 import { PrismaWorkspaceLeaseManager } from "../dist/approvals/workspace-lease.js";
 
 test("approval and repair outbox are atomic, single-decision, and workspace locks are fenced", { skip: !process.env.DATABASE_URL }, async () => {
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
+  const database = await isolatedDatabase(process.env.DATABASE_URL!);
+  const { prisma } = database;
   const user = await prisma.user.create({ data: { authSubject: `approval-test-${randomUUID()}` } });
   try {
     const connection = await prisma.gitLabConnection.create({ data: { userId: user.id, instanceUrl: "https://gitlab.example.test", authType: "PAT", accessTokenCiphertext: "fixture", credentialKeyVersion: "v1" } });
@@ -37,6 +37,6 @@ test("approval and repair outbox are atomic, single-decision, and workspace lock
   } finally {
     await prisma.project.deleteMany({ where: { createdByUserId: user.id } });
     await prisma.user.delete({ where: { id: user.id } });
-    await prisma.$disconnect();
+    await database.close();
   }
 });

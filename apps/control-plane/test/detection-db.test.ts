@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import test from "node:test";
-import { PrismaPg } from "@prisma/adapter-pg";
 import { decryptSecret, encryptSecret } from "@qolmesgpt/security";
-import { PrismaClient } from "../dist/generated/prisma/client.js";
+import { isolatedDatabase } from "./database-fixture.ts";
 import { PrismaSlsDetectionStore } from "../dist/detection/prisma.js";
 import { PrismaSlsVerificationStore } from "../dist/integrations/sls/prisma.js";
 import { parseEncryptedSecret } from "../dist/integrations/gitlab/types.js";
 
 test("SLS detection persists one task per source position and rolls back failures", { skip: !process.env.DATABASE_URL }, async () => {
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
+  const database = await isolatedDatabase(process.env.DATABASE_URL!);
+  const { prisma } = database;
   const key = randomBytes(32);
   const store = new PrismaSlsDetectionStore(prisma, { getKey: () => key });
   const user = await prisma.user.create({ data: { authSubject: `test-${randomUUID()}` } });
@@ -132,6 +132,6 @@ test("SLS detection persists one task per source position and rolls back failure
   } finally {
     await prisma.project.deleteMany({ where: { createdByUserId: user.id } });
     await prisma.user.delete({ where: { id: user.id } });
-    await prisma.$disconnect();
+    await database.close();
   }
 });

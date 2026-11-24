@@ -17,6 +17,8 @@ DATABASE_URL='<postgres-connection-url>' pnpm --filter @qolmesgpt/control-plane 
 DATABASE_URL='<postgres-connection-url>' QOLMESGPT_CREDENTIAL_KEY_BASE64='<base64-encoded-32-byte-key>' pnpm --filter @qolmesgpt/workers start
 ```
 
+For local development, Web and all credential-consuming workers reuse `~/.qolmesgpt/credential-key-v1` when no explicit key is provided. Production requires `QOLMESGPT_CREDENTIAL_KEY_BASE64`; use the same key for every process. Development processes must run under the same OS user to share the file.
+
 `QOLMESGPT_CREDENTIAL_KEY_VERSION` defaults to `v1`; it must match the version used when the Web API encrypted each connection's credentials. Keep the key outside Git. The worker reads credentials only from encrypted `DataSourceConnection` rows; a local `SLS_ACCESS_KEY_*` environment file alone does not enable a source.
 
 ## Verification
@@ -25,3 +27,5 @@ DATABASE_URL='<postgres-connection-url>' QOLMESGPT_CREDENTIAL_KEY_BASE64='<base6
 - With the development PostgreSQL container running, `DATABASE_URL='<postgres-connection-url>' pnpm --filter @qolmesgpt/control-plane test` runs the transactional integration test. It proves same-position replay creates no extra task, distinct positions with the same fingerprint create separate tasks, non-errors create no task, outbox rows match tasks, a failed task write rolls back the event, chunk replay is idempotent, and only one worker holds a connection lease.
 - The Consumer Group protocol itself was verified against `pyxis-telemetry-log / pyxis-trace-staging`; see `docs/decisions/sls-consumer-group.md`.
 - A live staging log creating a card through an enabled project connection remains an end-to-end test for T016, after GitLab project selection and Web configuration are available.
+
+Database integration tests create a unique temporary PostgreSQL schema, apply the project migrations there, and remove only that schema after the test. They never discover or change enabled data sources in the application schema.
