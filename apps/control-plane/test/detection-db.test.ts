@@ -4,7 +4,7 @@ import test from "node:test";
 import { decryptSecret, encryptSecret } from "@qolmesgpt/security";
 import { isolatedDatabase } from "./database-fixture.ts";
 import { PrismaSlsDetectionStore } from "../dist/detection/prisma.js";
-import { PrismaSlsVerificationStore } from "../dist/integrations/sls/prisma.js";
+import { PrismaSlsDataSourceWriter, PrismaSlsVerificationStore } from "../dist/integrations/sls/prisma.js";
 import { parseEncryptedSecret } from "../dist/integrations/gitlab/types.js";
 
 test("SLS detection persists one task per source position and rolls back failures", { skip: !process.env.DATABASE_URL }, async () => {
@@ -37,6 +37,22 @@ test("SLS detection persists one task per source position and rolls back failure
       endpoint: "https://cn-shanghai.log.aliyuncs.com", project: "telemetry", logstore: "staging",
       accessKeyId: "id", accessKeySecret: "secret",
     };
+
+    const workspace = await prisma.groupWorkspace.create({ data: { groupId: group.id, relativePath: "groups/test", status: "READY" } });
+    const writer = new PrismaSlsDataSourceWriter(prisma, {
+      encrypt: (value) => encryptSecret(value, "v1", { getKey: () => key }),
+      decrypt: (value) => decryptSecret(parseEncryptedSecret(value), { getKey: () => key }),
+    }, "v1");
+    const firstSource = await writer.createForWorkspace(workspace.id, user.id, savedConfig);
+    const secondSource = await writer.createForWorkspace(workspace.id, user.id, { ...savedConfig, logstore: "other" });
+    assert.notEqual(firstSource.id, secondSource.id);
+    await writer.createForWorkspace(workspace.id, user.id, { ...savedConfig, logstore: "updated" }, secondSource.id);
+    const workspaceSources = await prisma.dataSourceConnection.findMany({ where: { workspaceId: workspace.id } });
+    assert.equal(workspaceSources.length, 2);
+    assert.equal((workspaceSources.find((item) => item.id === firstSource.id)?.configJson as any).logstore, "staging");
+    assert.equal((workspaceSources.find((item) => item.id === secondSource.id)?.configJson as any).logstore, "updated");
+    await assert.rejects(writer.createForWorkspace(workspace.id, user.id, savedConfig, randomUUID()), /not found/);
+
     assert.equal(await verification.matchesConfig(connection.id, savedConfig), true);
     assert.equal(await verification.matchesConfig(connection.id, { ...savedConfig, endpoint: "https://cn-beijing.log.aliyuncs.com" }), false);
     assert.equal(await verification.matchesConfig(connection.id, { ...savedConfig, project: "other-project" }), false);

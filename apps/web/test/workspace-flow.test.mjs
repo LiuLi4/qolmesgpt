@@ -64,7 +64,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
     async tick() { intervals.forEach((callback) => callback()); await setImmediate(); },
     get focused() { return focused; }, get createCalls() { return createCalls; },
     completeCreate(workspace, nextWorkspaces) { state = { ...state, workspaces: nextWorkspaces }; pendingCreate(response({ ok: true, workspace, message: "Workspace 已建立" })); },
-    completeSls(result, sources = []) { state = { ...state, sources }; pendingSls(response(result)); },
+    completeSls(result, sources = []) { state = { ...state, sources }; pendingSls(response({ connection: { id: sources[0]?.id ?? "source-1" }, ...result })); },
   };
 }
 

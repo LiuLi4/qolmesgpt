@@ -7,10 +7,11 @@ export interface DataSourceRouteContext {
   readonly userId: string;
   readonly projectId?: string;
   readonly workspaceId?: string;
+  readonly sourceId?: string;
 }
 
 export interface SlsDataSourceWriter {
-  createForWorkspace?(workspaceId: string, userId: string, config: ReturnType<typeof normalizeSlsConfig>): Promise<{ id: string; status: "CONFIGURED" }>;
+  createForWorkspace?(workspaceId: string, userId: string, config: ReturnType<typeof normalizeSlsConfig>, sourceId?: string): Promise<{ id: string; status: "CONFIGURED" }>;
   create(projectId: string, config: ReturnType<typeof normalizeSlsConfig>): Promise<{ id: string; status: "CONFIGURED" }>;
 }
 
@@ -29,7 +30,7 @@ export class DataSourceRoutes {
     const config = normalizeSlsConfig(input);
     if (Boolean(context.projectId) === Boolean(context.workspaceId)) throw new Error("Exactly one workspace or legacy project scope is required");
     const connection = context.workspaceId
-      ? await this.writer.createForWorkspace!(context.workspaceId, context.userId, config)
+      ? await this.writer.createForWorkspace!(context.workspaceId, context.userId, config, context.sourceId)
       : await this.writer.create(context.projectId!, config);
     return { ...connection, type: "aliyun-sls" as const, config: safeSlsConfig(config) };
   }

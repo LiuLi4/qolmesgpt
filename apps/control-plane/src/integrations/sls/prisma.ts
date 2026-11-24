@@ -11,16 +11,21 @@ export class PrismaSlsDataSourceWriter {
     return this.store({ projectId }, config);
   }
 
-  async createForWorkspace(workspaceId: string, userId: string, config: SlsConfig): Promise<{ id: string; status: "CONFIGURED" }> {
+  async createForWorkspace(workspaceId: string, userId: string, config: SlsConfig, sourceId?: string): Promise<{ id: string; status: "CONFIGURED" }> {
     const workspace = await this.prisma.groupWorkspace.findFirst({ where: { id: workspaceId, group: { connection: { userId, status: "ACTIVE" } } } });
     if (!workspace) throw new Error("Group Workspace is unavailable");
     if (workspace.status !== "READY") throw new Error("Group Workspace repository synchronization must complete before configuring SLS");
-    return this.store({ workspaceId }, config);
+    return this.store({ workspaceId }, config, sourceId);
   }
 
-  private async store(scope: { projectId: string; workspaceId?: never } | { workspaceId: string; projectId?: never }, config: SlsConfig): Promise<{ id: string; status: "CONFIGURED" }> {
+  private async store(scope: { projectId: string; workspaceId?: never } | { workspaceId: string; projectId?: never }, config: SlsConfig, sourceId?: string): Promise<{ id: string; status: "CONFIGURED" }> {
+    if (sourceId && scope.workspaceId) {
+      const existing = await this.prisma.dataSourceConnection.findFirst({ where: { id: sourceId, workspaceId: scope.workspaceId, type: "ALIYUN_SLS" }, select: { id: true } });
+      if (!existing) throw new Error("Data source not found in this workspace");
+    }
+    const id = scope.workspaceId ? sourceId ?? crypto.randomUUID() : undefined;
     const stored = await this.prisma.dataSourceConnection.upsert({
-      where: scope.workspaceId ? { workspaceId_type: { workspaceId: scope.workspaceId, type: "ALIYUN_SLS" } } : { projectId_type: { projectId: scope.projectId!, type: "ALIYUN_SLS" } },
+      where: scope.workspaceId ? { id } : { projectId_type: { projectId: scope.projectId!, type: "ALIYUN_SLS" } },
       create: {
         ...scope,
         type: "ALIYUN_SLS",

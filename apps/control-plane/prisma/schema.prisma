@@ -217,7 +217,7 @@ model DataSourceConnection {
   errorEvents           ErrorEvent[]
 
   @@unique([projectId, type])
-  @@unique([workspaceId, type])
+  @@index([workspaceId, status])
   @@index([projectId, status])
 }
 

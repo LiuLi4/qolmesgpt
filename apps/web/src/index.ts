@@ -255,7 +255,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const accessKeySecret = String(body.accessKeySecret ?? process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET ?? process.env.SLS_ACCESS_KEY_SECRET ?? "");
       const securityToken = String(body.securityToken ?? process.env.ALIBABA_CLOUD_SECURITY_TOKEN ?? process.env.SLS_SECURITY_TOKEN ?? "");
       const config = { endpoint, project, logstore, consumerGroup, accessKeyId, accessKeySecret, ...(securityToken ? { securityToken } : {}) };
-      const connection = await runtime.sls.createSls({ userId: runtime.userId, projectId: projectId || undefined, workspaceId: workspaceId || undefined }, config);
+      const connection = await runtime.sls.createSls({ userId: runtime.userId, projectId: projectId || undefined, workspaceId: workspaceId || undefined, sourceId: body.sourceId ? String(body.sourceId) : undefined }, config);
       const connectionTest = await runtime.sls.verifyConnection(connection.id, config);
       const now = new Date();
       const readTest = await runtime.sls.verifyRead(connection.id, config, { from: safeDate(body.from, new Date(now.getTime() - 5 * 60_000)), to: safeDate(body.to, now) }, Math.min(100, Math.max(1, Number(body.limit ?? 20))));
