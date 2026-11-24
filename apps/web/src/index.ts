@@ -216,7 +216,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const now = new Date();
       const readTest = await runtime.sls.verifyRead(connection.id, config, { from: safeDate(body.from, new Date(now.getTime() - 5 * 60_000)), to: safeDate(body.to, now) }, Math.min(100, Math.max(1, Number(body.limit ?? 20))));
       const enabled = connectionTest.status === "passed" && (readTest.status === "passed" || readTest.status === "no_data") ? await runtime.sls.enable(connection.id) : null;
-      sendJson(res, 200, { ok: Boolean(enabled), connection, connectionTest, readTest, enabled, message: enabled ? "SLS 连接、读取测试通过，数据源已启用。" : "SLS 配置已保存，但连接或读取测试未通过。" });
+      sendJson(res, 200, { ok: Boolean(enabled), connection, connectionTest, readTest, enabled, message: enabled ? "SLS 连接、读取测试通过，配置已加密保存并启用。" : "SLS 配置已保存，但连接或读取测试未通过。" });
       return;
     }
     const approval = url.pathname.match(/^\/api\/tasks\/([^/]+)\/approve$/);

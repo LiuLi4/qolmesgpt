@@ -14,6 +14,7 @@ async function openPage(workspaces, sources = []) {
       classList: { add() {}, remove() {}, toggle() {} },
       addEventListener(event, callback) { this.listeners[event] = callback; },
       click() { if (!this.disabled) this.listeners.click?.call(this); },
+      input(value) { this.value = value; this.listeners.input?.call(this); },
       focus() { focused = id; },
       get innerHTML() { return html; },
       set innerHTML(value) { html = value; if (["sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? ""; },
@@ -23,6 +24,8 @@ async function openPage(workspaces, sources = []) {
   const nav = ["overview", "projects", "sources", "tasks", "approvals"].map((view) => element(`nav-${view}`, { view }));
   const location = { hash: "#projects" };
   let pendingCreate;
+  let pendingSls;
+  const slsRequests = [];
   let createCalls = 0;
   let state = { projects: [], tasks: [], workspaces, sources };
   const document = {
@@ -44,17 +47,19 @@ async function openPage(workspaces, sources = []) {
   runInNewContext(page.match(/<script>([\s\S]*?)<\/script>/)[1], {
     document, location, history: { replaceState: (_state, _title, hash) => { location.hash = hash; } },
     setTimeout() {},
-    fetch: async (url) => {
+    fetch: async (url, options) => {
       if (url === "/api/state") return response(state);
       if (url === "/api/gitlab/connections") return response({ connections: [{ id: "connection", status: "ACTIVE", instanceUrl: "http://git.example" }] });
       if (url.endsWith("/groups")) return response({ items: [{ id: "group", fullPath: "acme/platform", role: "MAINTAINER" }] });
       if (url === "/api/workspaces") { createCalls++; return new Promise((resolve) => { pendingCreate = resolve; }); }
+      if (url === "/api/sls/verify") { slsRequests.push(JSON.parse(options.body)); return new Promise((resolve) => { pendingSls = resolve; }); }
       throw new Error(`Unexpected fixture request: ${url}`);
     },
   });
   await setImmediate();
-  return { elements, location, get focused() { return focused; }, get createCalls() { return createCalls; },
+  return { elements, location, slsRequests, get focused() { return focused; }, get createCalls() { return createCalls; },
     completeCreate(workspace, nextWorkspaces) { state = { ...state, workspaces: nextWorkspaces }; pendingCreate(response({ ok: true, workspace, message: "Workspace 已建立" })); },
+    completeSls(result, sources = []) { state = { ...state, sources }; pendingSls(response(result)); },
   };
 }
 
@@ -99,4 +104,44 @@ test("an existing ready workspace offers a direct next step while a failed works
   button.click();
   assert.equal(ui.location.hash, "#sources");
   assert.equal(ui.elements.get("sls-workspace-id").value, "ready");
+});
+
+test("save invokes the real verification and persistence endpoint, reports saved state and clears credentials", async () => {
+  const ui = await openPage([workspace("ready")]);
+  ui.elements.get("sls-access-key-id").input("fixture-key");
+  ui.elements.get("sls-access-key-secret").input("fixture-secret");
+  const save = ui.elements.get("save-sls");
+  save.click();
+  save.click();
+  assert.equal(ui.slsRequests.length, 1);
+  assert.equal(ui.slsRequests[0].workspaceId, "ready");
+  assert.equal(ui.slsRequests[0].accessKeySecret, "fixture-secret");
+  assert.equal(save.disabled, true);
+  assert.equal(ui.elements.get("verify-sls").disabled, true);
+  ui.completeSls({ ok: true, message: "配置已加密保存并启用" }, [source()]);
+  await setImmediate();
+  assert.equal(save.textContent, "已保存");
+  assert.equal(save.disabled, true);
+  assert.match(ui.elements.get("source-result").textContent, /已加密保存/);
+  assert.equal(ui.elements.get("sls-access-key-id").value, "");
+  assert.equal(ui.elements.get("sls-access-key-secret").value, "");
+});
+
+function source() { return { id: "source-1", workspaceId: "ready", project: "custom-project", logstore: "custom-logstore", endpoint: "https://cn-shanghai.log.aliyuncs.com", consumerGroup: "custom-consumer", status: "ENABLED" }; }
+
+test("persisted configuration reloads as saved, and edits require another successful test before being marked saved", async () => {
+  const ui = await openPage([workspace("ready")], [source()]);
+  const save = ui.elements.get("save-sls");
+  assert.equal(save.textContent, "已保存");
+  assert.equal(save.disabled, true);
+  assert.match(ui.elements.get("sls-source-summary").textContent, /custom-project \/ custom-logstore/);
+  ui.elements.get("sls-logstore").input("another-logstore");
+  assert.equal(save.disabled, false);
+  assert.equal(save.textContent, "保存配置");
+  ui.elements.get("verify-sls").click();
+  ui.completeSls({ ok: false, message: "读取测试未通过" });
+  await setImmediate();
+  assert.equal(save.disabled, false);
+  assert.match(ui.elements.get("source-result").textContent, /读取测试未通过/);
+  assert.equal(ui.elements.get("source-status").textContent, "测试失败");
 });
