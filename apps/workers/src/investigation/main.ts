@@ -6,7 +6,7 @@ import { runInvestigationOnce } from "./worker.js";
 
 const baseUrl = process.env.HOLMESGPT_URL;
 if (!baseUrl) throw new Error("HOLMESGPT_URL is required");
-const runtime = createInvestigationRuntime();
+const runtime = await createInvestigationRuntime();
 const client = new HttpHolmesClient(baseUrl, process.env.HOLMESGPT_API_KEY);
 const owner = `investigator-${hostname()}-${randomUUID()}`;
 const controller = new AbortController();
@@ -15,7 +15,7 @@ process.once("SIGTERM", () => controller.abort());
 
 try {
   while (!controller.signal.aborted) {
-    const claimed = await runInvestigationOnce(runtime.store, client, owner);
+    const claimed = await runInvestigationOnce(runtime.store, { investigate: async (job) => client.investigate(await runtime.prepare(job)) }, owner);
     if (!claimed) await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 } finally {

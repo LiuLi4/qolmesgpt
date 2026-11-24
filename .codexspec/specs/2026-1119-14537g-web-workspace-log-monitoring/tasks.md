@@ -131,12 +131,12 @@
 - **Paths**: `apps/workers/src/sls-consumer/`, `apps/workers/src/detection/`, `apps/control-plane/src/detection/`.
 - **Dependencies**: T002–T004, T008, T009.
 - **Covers**: REQ-016–REQ-018, REQ-032–REQ-034, NFR-006–NFR-007; **Plan**: Phase 4, SLS Consumer Service and Detection Pipeline.
-- **Verification**: Worker unit tests cover checkpoint ordering, source recovery and transient PullLogs retry. PostgreSQL integration tests cover per-position idempotency, independent same-fingerprint cards, non-error filtering, outbox creation, and transaction rollback. `SLSConsumerState` exposes assignments, heartbeat, lagging flag, and last checkpoint. Live staging card creation remains a T016 end-to-end check once a project connection is enabled.
+- **Verification**: Worker unit tests cover checkpoint ordering, source recovery and transient PullLogs retry. PostgreSQL integration tests cover per-position idempotency, request/fingerprint grouping, counts, concurrency and evidence-version fencing, non-error filtering, outbox creation, and transaction rollback. `SLSConsumerState` exposes assignments, heartbeat, lagging flag, and last checkpoint. Live staging card creation remains a T016 end-to-end check once a project connection is enabled.
 - **Test Scenarios**:
   1. Enabled verified source consumes an error and creates exactly one event/task/outbox row.
   2. Non-error log advances checkpoint without creating a task.
   3. Database failure prevents checkpoint ack and allows replay.
-  4. Duplicate source position is idempotent; distinct positions with same fingerprint create separate tasks.
+  4. Duplicate source position is idempotent; distinct positions preserve events and group requests/fingerprints within bounded windows.
   5. Disconnect/rebalance recovers without dropping uncommitted records.
 
 ### Group D — Investigation and repair
@@ -243,3 +243,11 @@ T002, T003 and T004 may run in parallel after T001. T007 and T008 are sequential
 | Web UI/release | T014–T016 | REQ-001, REQ-008, REQ-011, REQ-013–REQ-016, REQ-018, REQ-021–REQ-029, REQ-032–REQ-036, NFR-001–NFR-007 |
 
 All testable tasks include individually traceable Test Scenarios. No task is outside the approved plan; T009 is the explicit implementation gate required by PLD-003.
+
+
+### 2026-11-24 补齐验证记录
+
+- Migration 0007、请求/指纹归并、历史待调查归并、SLS 同请求上下文、仓库位置取证、真实 Holmes HTTP Worker、证据版本、UI 计数/详情刷新和重新调查已实现。
+- build/lint/typecheck、Prisma schema validation、67 个测试通过（数据库测试使用独立 schema，未跳过）。
+- 原有 39 张待调查卡片归并为 7 张，保留全部事件；真实请求补查得到 55 条同请求日志，检索 10 个仓库。后续新错误正常新增任务。
+- 真实模型根因验收仍未通过：当前 OPENROUTER_API_KEY 被 OpenRouter 拒绝为无效 Key（401）。不得标记真实模型调查或修复验收成功。

@@ -11,7 +11,7 @@
 
 当前仓库是 Python HolmesGPT 服务，具备 FastAPI `/api/chat` 调查入口和进程级配置的只读阿里云 SLS toolset。仓库没有产品级 TypeScript 后端或正式 Web UI；`experimental/ag-ui` 是演示项目，README 明确声明不适用于生产。因此新产品由 TypeScript 控制面承载，Python HolmesGPT 保持为内部调查执行引擎。SLS 和 GitLab 的用户/项目级配置归 TypeScript 控制面管理，不写入 HolmesGPT 全局 YAML。
 
-设计沿用 PostgreSQL + Prisma、GitLab Group 权限边界、SLS 实时消费、每条日志独立任务、基础任务状态、单人审批和项目测试加 SLS 复查的已确认决策。具体 Web 框架、SLS Node SDK 及消费组部署形态尚无仓库既有约定，本设计定义边界接口，不把未验证的包或部署产品固化为要求。
+设计沿用 PostgreSQL + Prisma、GitLab Group 权限边界、SLS 实时消费、请求聚合与错误指纹归并、基础任务状态、单人审批和项目测试加 SLS 复查的已确认决策。具体 Web 框架、SLS Node SDK 及消费组部署形态尚无仓库既有约定，本设计定义边界接口，不把未验证的包或部署产品固化为要求。
 
 ## Architecture & Components
 
@@ -47,7 +47,7 @@
 
 ### Detection Pipeline and Task Service
 
-- **Responsibility**: 使用已确认的 SLS 默认错误规则分类日志；将每条匹配日志作为一个独立 ErrorEvent 和 InvestigationTask 写入 PostgreSQL；更新任务基础状态并提交调查队列。相同日志因重试再次投递时，通过来源位置唯一键实现幂等；不同日志不按 fingerprint 聚合。
+- **Responsibility**: 使用已确认的 SLS 默认错误规则分类日志；将每条匹配日志作为独立 ErrorEvent 写入 PostgreSQL，并关联按请求或指纹归并的 InvestigationTask；更新任务基础状态并提交调查队列。相同日志因重试再次投递时，通过来源位置唯一键实现幂等；不同请求按规范化 fingerprint 在 15 分钟跨度内归并，审批后的任务隔离。
 - **Interface**: 接收 `(DataSourceConnection, SourcePosition, LogRecord)`；事务写入 ErrorEvent 和 InvestigationTask 后返回持久化确认。没有匹配错误规则的记录不创建调查任务，但仍允许 consumer 正常确认其位置。
 - **Covers**: REQ-017, REQ-018, REQ-033, REQ-034, NFR-003, NFR-007
 
@@ -103,10 +103,9 @@
 
 ### Decision 4: Event identity differs from error fingerprint
 
-- **Context**: 产品决策要求每条匹配错误日志独立建卡，但实时消费可能重复投递同一条记录。
-- **Decision**: 用不可变 `sourcePositionKey` 去重同一条源日志的重投递；不同 source position 即使错误 fingerprint 相同，也创建独立任务。fingerprint 只用于搜索/分析，不作为任务唯一键。
-- **Alternatives**: 无幂等，可能同一条源日志重复建卡；按 fingerprint 合并任务。
-- **Trade-offs**: 保持用户确认的一日志一任务，代价是任务和证据记录量较大，需容量监控与数据保留策略设计。
+- **Context**: 最新需求要求请求聚合与错误去重，同时消费可能重投同一记录。
+- **Decision**: sourcePositionKey 标识原始日志，trace/request 标识请求，规范化 fingerprint 标识重复错误。ErrorEvent.taskId 建立多对一证据关系；anchor errorEventId 保持向后兼容。Workspace advisory lock 串行归并，行锁隔离审批/调查提交，evidenceVersion 防止旧快照进入审批。
+- **Trade-offs**: 时间窗口和关键词代码定位均为有界启发式；不确定性必须出现在调查结果中。源码正文不发送给模型。
 - **Covers**: REQ-033, NFR-007
 
 ### Decision 5: Authorization follows the live GitLab Group boundary
@@ -148,7 +147,7 @@
 | `DataSourceVerification` | `connectionId`, `kind`, `status`, `testedAt`, `safeSummary`, `errorCode` | kind 分为连接和读取；错误摘要经过脱敏；检测启用读取最近成功结果 | REQ-013 至 REQ-015 |
 | `SLSConsumerState` | `connectionId`, `consumerGroup`, `workerId`, `shardAssignments`, `checkpointSummary`, `status`, `lastHeartbeatAt` | 每连接/消费组唯一；SLS 服务端 checkpoint 为进度权威；数据库状态用于调度、观测和恢复 | REQ-016, REQ-032, NFR-006 |
 | `ErrorEvent` | `dataSourceConnectionId`, `sourcePositionKey`, `sourceTimestamp`, `logEvidenceJson`, `fingerprint` | `(dataSourceConnectionId, sourcePositionKey)` unique；证据脱敏；fingerprint 非唯一 | REQ-017, REQ-018, REQ-033, NFR-007 |
-| `InvestigationTask` | `projectId`, `errorEventId`, `status`, `priority`, `investigationResultJson` | errorEventId unique；状态受服务端转换表约束；priority 首期固定 high | REQ-018 至 REQ-021, REQ-033, REQ-034 |
+| `InvestigationTask` | `projectId`, `workspaceId`, `errorEventId`, `status`, `priority`, `investigationResultJson`, `firstSeenAt`, `lastSeenAt`, `occurrenceCount`, `requestCount`, `evidenceVersion`, `analyzedVersion` | errorEventId unique；状态受服务端转换表约束；priority 首期固定 high | REQ-018 至 REQ-021, REQ-033, REQ-034 |
 | `Approval` | `taskId`, `approverUserId`, `groupRoleAtApproval`, `decision`, `approvedAt`, `authorizationVersion` | 通过决策每任务最多一个有效记录；保存 GitLab 实时 role 检查时间和授权审计信息 | REQ-022, REQ-023, REQ-035, NFR-002 |
 | `RepairRun` | `taskId`, `workspaceId`, `branch`, `status`, `testResult`, `slsRecheckResult`, `startedAt`, `finishedAt` | 每次执行单独记录；只能引用有效 Approval；workspace 锁 fencing token 需匹配 | REQ-024, REQ-025, REQ-036, NFR-002, NFR-005 |
 | `MergeRequest` | `repairRunId`, `externalMrId`, `url`, `status` | repairRunId unique；创建请求需用 idempotency key 防止重试重复开 MR | REQ-026, REQ-036 |

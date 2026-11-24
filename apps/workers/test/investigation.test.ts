@@ -4,7 +4,7 @@ import { HttpHolmesClient, type InvestigationJob } from "../dist/investigation/c
 import { runInvestigationOnce } from "../dist/investigation/worker.js";
 
 const job: InvestigationJob = {
-  outboxId: "outbox-1", taskId: "task-1", projectId: "project-1", errorEventId: "event-1",
+  evidenceVersion: 1, relatedLogs: [], outboxId: "outbox-1", taskId: "task-1", projectId: "project-1", errorEventId: "event-1",
   errorEvidence: { level: 50, msg: "database timeout" }, projectPath: "group/project", workspacePath: "workspaces/project", attempts: 1,
 };
 
@@ -34,4 +34,19 @@ test("investigation worker retries transient Holmes failures and finally marks f
   await runInvestigationOnce(store, client, "worker");
   await runInvestigationOnce(store, client, "worker");
   assert.deepEqual(events, ["fail:HOLMES_HTTP_503:retry", "fail:HOLMES_HTTP_503:retry", "fail:HOLMES_HTTP_503:final"]);
+});
+
+
+test("worker completes the claimed evidence version and client refuses empty conclusions", async () => {
+  const result = { summary: "s", rootCause: "r", codeContext: [], proposedFix: "p", confidence: "low" as const };
+  let completedVersion = 0;
+  await runInvestigationOnce({ claim: async () => ({ ...job, evidenceVersion: 7 }), complete: async (_id, _owner, _result, version) => { completedVersion = version; }, fail: async () => { assert.fail("unexpected failure"); } }, { investigate: async () => result }, "worker");
+  assert.equal(completedVersion, 7);
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async (_url, init) => {
+    assert.ok(init?.signal);
+    const body = JSON.parse(String(init?.body));
+    assert.ok(body.response_format.json_schema.schema.required.includes("affectedProjectIds"));
+    return new Response(JSON.stringify({ analysis: JSON.stringify({ ...result, rootCause: "" }) }));
+  });
+  await assert.rejects(client.investigate(job), /HOLMES_INCOMPLETE_RESULT/);
 });

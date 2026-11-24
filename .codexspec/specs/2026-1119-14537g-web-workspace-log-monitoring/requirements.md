@@ -193,13 +193,14 @@
 - **Reason**: The user selected real-time consumption for the 7×24 detection requirement.
 - **User Evidence**: “SLS 实时消费，目标秒级发现”。
 
-### DEC-010: One investigation task per error log
+### DEC-010: Request aggregation and repeated-error grouping (updated 2026-11-24)
 
-- **Status**: confirmed
-- **Decision**: Create one independent investigation task for every log that matches the error rules; do not automatically aggregate repeated errors in the first release.
-- **Alternatives Rejected**: Project/data source/fingerprint aggregation within a 15-minute window; aggregation until manual closure.
-- **Reason**: The user selected one task per error.
-- **User Evidence**: “2”，对应“每条错误创建独立任务”。
+- **Status**: confirmed; supersedes the initial one-card-per-error decision.
+- **Decision**: Preserve every source-position-deduplicated ErrorEvent; aggregate matching requests within the Workspace using traceId then service/requestId. Group normalized fingerprints across requests within a bounded window; preserve counts, first/last timestamps and evidence versions.
+- **Implementation defaults**: Request span 60 minutes; fingerprint span 15 minutes; initial collection delay 10 seconds capped at 60 seconds. Missing request IDs remain individually counted.
+- **Reason**: The latest user request explicitly asks to complete deduplication/request aggregation and invoke HolmesGPT for root-cause investigation.
+- **User Evidence**: “按照错误日志去重、聚合属于一次请求的错误日志信息，调用 HolmesGPT 定位具体错误原因” followed by “补齐”。
+- **Limits**: Approved/repairing/failed/closed tasks do not accept new evidence. Real model output requires working provider credentials. Private repository source contents remain outside model prompts; bounded file/line references are permitted.
 
 ### DEC-011: Basic task card flow
 

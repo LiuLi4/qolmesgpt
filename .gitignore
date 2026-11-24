@@ -183,3 +183,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 apps/control-plane/src/generated/
+
+# Private runtime repository checkouts
+apps/web/.qolmesgpt-workspaces/

@@ -111,14 +111,14 @@ HolmesGPT Python 服务继续由现有仓库入口运行；TypeScript Investigat
 1. 研究并实现 SLS Consumer Group 协议探针，确认 group membership、shard assignment、checkpoint/ack、rebalance、retry 和稳定 source position。
 2. 仅在 Phase 4 门禁通过后实现独立 consumer worker、health/lag 状态、断线重连和消费恢复。
 3. 将记录交给 Detection Pipeline；在一个数据库事务内写 ErrorEvent、InvestigationTask 和 outbox，成功后才提交 checkpoint。
-4. 用 `(connectionId, sourcePositionKey)` 幂等，保留相同 fingerprint 的不同日志为独立任务。
+4. 用 `(connectionId, sourcePositionKey)` 幂等，保留各日志为独立证据，按请求与指纹窗口归并任务。
 
 **Covers**: REQ-016–REQ-018, REQ-032–REQ-034, NFR-003, NFR-006–NFR-007; **Design**: SLS Consumer Service, Detection Pipeline and Task Service, Decision 3, Decision 4.
 
 **Verification**:
 
 - 协议 fixture/集成探针验证断线、重复投递、rebalance、checkpoint 恢复和无稳定位置时的明确失败。
-- 检查“数据库提交失败不 ack、重复投递不重复建卡、不同 source position 不聚合”。
+- 检查“数据库提交失败不 ack、重复投递不重复建卡、不同 source position 保留证据且满足窗口时归并任务”。
 - 以 staging 测试日志验证秒级检测目标和逐条任务创建；测量 consumer lag 与任务创建延迟。
 
 ### Phase 5 — Investigation adapter and task APIs

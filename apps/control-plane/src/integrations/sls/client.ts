@@ -4,7 +4,7 @@ import type { SlsClient, SlsClientFactory, SlsConfig } from "./types.js";
 type SdkClient = new (config: Record<string, unknown>) => {
   getProject(project: string): Promise<unknown>;
   getLogStore(project: string, logstore: string): Promise<unknown>;
-  getLogs(project: string, logstore: string, from: Date, to: Date, query: Record<string, unknown>): Promise<unknown>;
+  getLogs(project: string, logstore: string, from: Date, to: Date, query: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
 };
 
 const require = createRequire(import.meta.url);
@@ -21,7 +21,7 @@ export const aliyunSlsClientFactory: SlsClientFactory = {
     return {
       getProject: (project) => client.getProject(project),
       getLogStore: (project, logstore) => client.getLogStore(project, logstore),
-      getLogs: (project, logstore, from, to, query) => client.getLogs(project, logstore, from, to, query),
+      getLogs: (project, logstore, from, to, query) => client.getLogs(project, logstore, from, to, query, { timeout: 5_000 }),
     };
   },
 };

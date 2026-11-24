@@ -255,13 +255,20 @@ model ErrorEvent {
   sourceTimestamp        DateTime             @db.Timestamptz(6)
   logEvidenceJson        Json
   fingerprint            String
+  correlationKey         String?
+  traceId                String?
+  requestId              String?
+  taskId                 String?              @db.Uuid
   createdAt              DateTime             @default(now()) @db.Timestamptz(6)
   dataSourceConnection   DataSourceConnection @relation(fields: [dataSourceConnectionId], references: [id], onDelete: Cascade)
   investigationTask      InvestigationTask?
+  groupedTask            InvestigationTask?   @relation("GroupedEvidence", fields: [taskId], references: [id], onDelete: SetNull)
 
   @@unique([dataSourceConnectionId, sourcePositionKey])
   @@index([dataSourceConnectionId, sourceTimestamp])
   @@index([fingerprint])
+  @@index([taskId, sourceTimestamp])
+  @@index([correlationKey])
 }
 
 model InvestigationTask {
@@ -272,18 +279,27 @@ model InvestigationTask {
   status                  InvestigationTaskStatus @default(INVESTIGATION_PENDING)
   priority                TaskPriority            @default(HIGH)
   investigationResultJson Json?
+  firstSeenAt             DateTime                @default(now()) @db.Timestamptz(6)
+  lastSeenAt              DateTime                @default(now()) @db.Timestamptz(6)
+  occurrenceCount         Int                     @default(1)
+  requestCount            Int                     @default(1)
+  evidenceVersion         Int                     @default(1)
+  analyzedVersion         Int                     @default(0)
+  mergedIntoTaskId        String?                 @db.Uuid
   createdAt               DateTime                @default(now()) @db.Timestamptz(6)
   updatedAt               DateTime                @updatedAt @db.Timestamptz(6)
   project                 Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspace               GroupWorkspace?         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   repositories            TaskRepository[]
   errorEvent              ErrorEvent              @relation(fields: [errorEventId], references: [id], onDelete: Cascade)
+  events                  ErrorEvent[]            @relation("GroupedEvidence")
   approvals               Approval[]
   repairRuns              RepairRun[]
   outboxMessages          OutboxMessage[]
 
   @@index([projectId, status, createdAt])
   @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, lastSeenAt])
 }
 
 model Approval {

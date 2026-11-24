@@ -2,7 +2,7 @@ import type { InvestigationJob, InvestigationResult, HolmesClient } from "./clie
 
 type Store = {
   claim(owner: string): Promise<InvestigationJob | null>;
-  complete(outboxId: string, owner: string, result: InvestigationResult): Promise<void>;
+  complete(outboxId: string, owner: string, result: InvestigationResult, evidenceVersion: number): Promise<void>;
   fail(outboxId: string, owner: string, error: { code: string; message: string }, retryAt: Date | null): Promise<void>;
 };
 
@@ -12,7 +12,7 @@ export async function runInvestigationOnce(store: Store, client: HolmesClient, o
   const job = await store.claim(owner);
   if (!job) return false;
   try {
-    await store.complete(job.outboxId, owner, await client.investigate(job));
+    await store.complete(job.outboxId, owner, await client.investigate(job), job.evidenceVersion);
   } catch (error) {
     const message = error instanceof Error ? error.message : "HOLMES_INVESTIGATION_FAILED";
     const retryDelay = RETRY_DELAYS_MS[job.attempts - 1];

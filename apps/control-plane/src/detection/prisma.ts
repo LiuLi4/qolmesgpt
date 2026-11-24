@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
-import type { Prisma, PrismaClient } from "../generated/prisma/client.js";
+import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
 import { decryptSecret, redact, type KeyProvider } from "@qolmesgpt/security";
 import { parseEncryptedSecret } from "../integrations/gitlab/types.js";
 import { classifySlsError } from "../integrations/sls/classifier.js";
+import { aggregationIdentity, FINGERPRINT_WINDOW_MS, REQUEST_WINDOW_MS, AGGREGATION_DELAY_MS } from "./aggregation.js";
 
 export interface DetectionLog {
   readonly sourcePositionKey: string;
@@ -48,7 +48,7 @@ function sanitize(value: unknown, secrets: readonly string[]): unknown {
   return value;
 }
 
-function evidence(record: Readonly<Record<string, string | number>>, secrets: readonly string[]): Prisma.InputJsonValue {
+export function evidence(record: Readonly<Record<string, unknown>>, secrets: readonly string[]): Prisma.InputJsonValue {
   const bounded = Object.fromEntries(Object.entries(record).slice(0, 100).map(([key, value]) => {
     const text = typeof value === "string" ? value.slice(0, 4_096) : value;
     if (key !== "content" || typeof value !== "string") return [key, text];
@@ -73,6 +73,53 @@ function sourceTimestamp(record: Readonly<Record<string, string | number>>): Dat
   const date = new Date(seconds * 1_000);
   if (!Number.isFinite(seconds) || Number.isNaN(date.valueOf())) throw new Error("SLS log has no valid source timestamp");
   return date;
+}
+
+type Scope = { projectId: string | null; workspaceId?: string | null };
+type Group = { id: string; status: string; createdAt: Date };
+async function lockScope(tx: Prisma.TransactionClient, scope: Scope): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`investigation:${scope.workspaceId ?? scope.projectId}`}, 0))`;
+}
+async function findGroup(tx: Prisma.TransactionClient, scope: Scope, identity: { fingerprint: string; correlationKey: string | null }, timestamp: Date, exclude?: string): Promise<Group | null> {
+  const base = {
+    ...(scope.workspaceId ? { workspaceId: scope.workspaceId } : { projectId: scope.projectId, workspaceId: null }),
+    ...(exclude ? { id: { not: exclude } } : {}), mergedIntoTaskId: null,
+    status: { in: ["INVESTIGATION_PENDING", "INVESTIGATING", "AWAITING_APPROVAL"] as ("INVESTIGATION_PENDING" | "INVESTIGATING" | "AWAITING_APPROVAL")[] },
+    approvals: { none: {} }, repairRuns: { none: {} },
+  };
+  for (const mode of ["request", "fingerprint"] as const) {
+    if (mode === "request" && !identity.correlationKey) continue;
+    const window = mode === "request" ? REQUEST_WINDOW_MS : FINGERPRINT_WINDOW_MS;
+    const group = await tx.investigationTask.findFirst({ where: {
+      ...base,
+      firstSeenAt: { gte: new Date(timestamp.getTime() - window) },
+      lastSeenAt: { lte: new Date(timestamp.getTime() + window) },
+      events: { some: mode === "request" ? { correlationKey: identity.correlationKey } : { fingerprint: identity.fingerprint } },
+    }, orderBy: { createdAt: "asc" }, select: { id: true, status: true, createdAt: true } });
+    if (group) {
+      await tx.$queryRaw`SELECT id FROM "InvestigationTask" WHERE id = ${group.id}::uuid FOR UPDATE`;
+      const eligible = await tx.investigationTask.findFirst({ where: { ...base, id: group.id }, select: { id: true, status: true, createdAt: true } });
+      if (eligible) return eligible;
+    }
+  }
+  return null;
+}
+async function enqueue(tx: Prisma.TransactionClient, taskId: string, availableAt: Date) {
+  await tx.outboxMessage.create({ data: { aggregateType: "InvestigationTask", aggregateId: taskId, eventType: "InvestigationRequested", payload: { taskId }, availableAt } });
+}
+async function refreshGroup(tx: Prisma.TransactionClient, group: Group): Promise<void> {
+  const rows = await tx.$queryRaw<{ count: number; requests: number; first: Date; last: Date }[]>`
+    SELECT count(*)::int AS count, count(DISTINCT COALESCE("correlationKey", id::text))::int AS requests,
+    min("sourceTimestamp") AS first, max("sourceTimestamp") AS last FROM "ErrorEvent" WHERE "taskId" = ${group.id}::uuid`;
+  const stats = rows[0]!;
+  const reopen = group.status === "AWAITING_APPROVAL";
+  await tx.investigationTask.update({ where: { id: group.id }, data: {
+    firstSeenAt: stats.first, lastSeenAt: stats.last, occurrenceCount: stats.count, requestCount: stats.requests,
+    evidenceVersion: { increment: 1 }, ...(reopen ? { status: "INVESTIGATION_PENDING", investigationResultJson: Prisma.DbNull, analyzedVersion: 0 } : {}),
+  } });
+  const availableAt = new Date(Math.min(Date.now() + AGGREGATION_DELAY_MS, group.createdAt.getTime() + 60_000));
+  if (reopen) await enqueue(tx, group.id, availableAt);
+  else await tx.outboxMessage.updateMany({ where: { aggregateId: group.id, eventType: "InvestigationRequested", claimedAt: null }, data: { availableAt } });
 }
 
 export class PrismaSlsDetectionStore {
@@ -143,47 +190,62 @@ export class PrismaSlsDetectionStore {
       .map((log) => [requiredString(log.sourcePositionKey, "source position"), log])).values()];
     if (!matches.length) return 0;
     let created = 0;
-    for (let offset = 0; offset < matches.length; offset += 100) {
-      const chunk = matches.slice(offset, offset + 100);
+    for (const log of matches) {
       created += await this.prisma.$transaction(async (tx) => {
-        const events = await tx.errorEvent.createManyAndReturn({
-          data: chunk.map((log) => ({
-            dataSourceConnectionId: source.id,
-            sourcePositionKey: log.sourcePositionKey,
-            sourceTimestamp: sourceTimestamp(log.record),
-            logEvidenceJson: evidence(log.record, [source.accessKeyId ?? "", source.accessKeySecret ?? "", source.securityToken ?? ""]),
-            fingerprint: createHash("sha256").update([
-              log.record.service ?? "",
-              log.record.component ?? "",
-              log.record.msg ?? log.record.message ?? log.record.content ?? "",
-            ].join("\n")).digest("hex"),
-          })),
-          skipDuplicates: true,
-          select: { id: true },
-        });
-        if (!events.length) return 0;
-        const tasks = await tx.investigationTask.createManyAndReturn({
-          data: events.map((event) => ({
-            projectId: source.projectId,
-            workspaceId: source.workspaceId ?? null,
-            errorEventId: event.id,
-            status: "INVESTIGATION_PENDING",
-            priority: "HIGH",
-          })),
-          select: { id: true },
-        });
-        await tx.outboxMessage.createMany({
-          data: tasks.map((task) => ({
-            aggregateType: "InvestigationTask",
-            aggregateId: task.id,
-            eventType: "InvestigationRequested",
-            payload: { taskId: task.id, projectId: source.projectId, workspaceId: source.workspaceId ?? null, connectionId: source.id },
-          })),
-        });
-        return tasks.length;
+        await lockScope(tx, source);
+        const actual = await tx.dataSourceConnection.findUniqueOrThrow({ where: { id: source.id }, select: { projectId: true, workspaceId: true } });
+        if (actual.projectId !== source.projectId || (actual.workspaceId ?? null) !== (source.workspaceId ?? null)) throw new Error("SLS source scope mismatch");
+        const existing = await tx.errorEvent.findUnique({ where: { dataSourceConnectionId_sourcePositionKey: { dataSourceConnectionId: source.id, sourcePositionKey: log.sourcePositionKey } }, select: { id: true } });
+        if (existing) return 0;
+        const sourceDate = sourceTimestamp(log.record);
+        const identity = aggregationIdentity(log.record);
+        const event = await tx.errorEvent.create({ data: {
+          dataSourceConnectionId: source.id, sourcePositionKey: log.sourcePositionKey, sourceTimestamp: sourceDate,
+          logEvidenceJson: evidence(log.record, [source.accessKeyId ?? "", source.accessKeySecret ?? "", source.securityToken ?? ""]),
+          ...identity,
+        } });
+        const candidate = await findGroup(tx, source, identity, sourceDate);
+        if (candidate) {
+          await tx.errorEvent.update({ where: { id: event.id }, data: { taskId: candidate.id } });
+          await refreshGroup(tx, candidate);
+          return 0;
+        }
+        const task = await tx.investigationTask.create({ data: {
+          projectId: source.projectId, workspaceId: source.workspaceId ?? null, errorEventId: event.id,
+          status: "INVESTIGATION_PENDING", priority: "HIGH", firstSeenAt: sourceDate, lastSeenAt: sourceDate,
+        } });
+        await tx.errorEvent.update({ where: { id: event.id }, data: { taskId: task.id } });
+        await enqueue(tx, task.id, new Date(Date.now() + AGGREGATION_DELAY_MS));
+        return 1;
       }, { timeout: 30_000 });
     }
     return created;
+  }
+
+  /** Reconcile pre-aggregation pending tasks without deleting evidence or changing approved work. */
+  async reconcilePending(): Promise<number> {
+    const tasks = await this.prisma.investigationTask.findMany({ where: { status: "INVESTIGATION_PENDING", mergedIntoTaskId: null, approvals: { none: {} } }, orderBy: { firstSeenAt: "asc" }, take: 10_000, select: { id: true, projectId: true, workspaceId: true } });
+    let merged = 0;
+    for (const task of tasks) {
+      merged += await this.prisma.$transaction(async (tx) => {
+        await lockScope(tx, task);
+        const current = await tx.investigationTask.findUniqueOrThrow({ where: { id: task.id }, include: { events: true, approvals: true } });
+        if (current.status !== "INVESTIGATION_PENDING" || current.mergedIntoTaskId || current.approvals.length) return 0;
+        for (const event of current.events) {
+          const identity = aggregationIdentity(object(event.logEvidenceJson));
+          await tx.errorEvent.update({ where: { id: event.id }, data: identity });
+        }
+        const anchor = await tx.errorEvent.findUniqueOrThrow({ where: { id: current.errorEventId } });
+        const candidate = await findGroup(tx, task, anchor, anchor.sourceTimestamp, task.id);
+        if (!candidate || candidate.createdAt > current.createdAt) return 0;
+        await tx.errorEvent.updateMany({ where: { taskId: task.id }, data: { taskId: candidate.id } });
+        await tx.outboxMessage.deleteMany({ where: { aggregateId: task.id, eventType: "InvestigationRequested" } });
+        await tx.investigationTask.update({ where: { id: task.id }, data: { mergedIntoTaskId: candidate.id, status: "CLOSED" } });
+        await refreshGroup(tx, candidate);
+        return 1;
+      }, { timeout: 30_000 });
+    }
+    return merged;
   }
 
   async recordBatch(source: EnabledSlsSource, logs: readonly DetectionLog[], created: number, workerId: string): Promise<void> {

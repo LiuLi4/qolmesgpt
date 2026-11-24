@@ -1,3 +1,4 @@
+import { PrismaInvestigationStore } from "@qolmesgpt/control-plane";
 import { backfillSls, AliyunSlsConsumerProtocol } from "@qolmesgpt/workers";
 import { GitRepositoryCheckout } from "@qolmesgpt/control-plane";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -75,8 +76,8 @@ async function statePayload(workspaceId?: string) {
     orderBy: { updatedAt: "desc" },
   });
   const tasks = await runtime.prisma.investigationTask.findMany({
-    where: { ...(workspaceId ? { workspaceId } : {}), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
-    orderBy: { errorEvent: { sourceTimestamp: "desc" } },
+    where: { mergedIntoTaskId: null, ...(workspaceId ? { workspaceId } : {}), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
+    orderBy: { lastSeenAt: "desc" },
     take: 100,
     include: { project: { select: { id: true, pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { id: true, pathWithNamespace: true } } } }, errorEvent: { select: { logEvidenceJson: true, sourceTimestamp: true } }, approvals: { select: { decision: true, approvedAt: true }, take: 1 } },
   });
@@ -140,6 +141,9 @@ async function statePayload(workspaceId?: string) {
       return {
         id: task.id,
         workspaceId: task.workspaceId,
+        occurrenceCount: task.occurrenceCount, requestCount: task.requestCount,
+        firstSeenAt: task.firstSeenAt, lastSeenAt: task.lastSeenAt,
+        investigation: task.investigationResultJson,
         detectedAt: task.errorEvent.sourceTimestamp.toISOString(),
         logEvidence: task.errorEvent.logEvidenceJson,
         projectId: task.projectId,
@@ -263,13 +267,22 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       sendJson(res, 200, { ok: Boolean(enabled), connection, connectionTest, readTest, enabled, message: enabled ? "SLS 连接、读取测试通过，配置已加密保存并启用。" : "SLS 配置已保存，但连接或读取测试未通过。" });
       return;
     }
+    const retryInvestigation = req.method === "POST" && url.pathname.match(/^\/api\/tasks\/([^/]+)\/investigate$/);
+    if (retryInvestigation) {
+      const runtime = await getWebRuntime();
+      const task = await runtime.prisma.investigationTask.findFirst({ where: { id: decodeURIComponent(retryInvestigation[1]!), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] }, select: { id: true } });
+      if (!task) { sendJson(res, 404, { message: "任务不存在" }); return; }
+      await new PrismaInvestigationStore(runtime.prisma).retry(task.id);
+      sendJson(res, 200, { ok: true, message: "已重新加入 HolmesGPT 调查队列" });
+      return;
+    }
     const approval = url.pathname.match(/^\/api\/tasks\/([^/]+)\/approve$/);
     const taskDetail = req.method === "GET" && url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
     if (taskDetail) {
       const runtime = await getWebRuntime();
       const task = await runtime.prisma.investigationTask.findFirst({
         where: { id: decodeURIComponent(taskDetail[1]!), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
-        include: { project: { select: { pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { pathWithNamespace: true } } } }, errorEvent: { select: { sourceTimestamp: true, logEvidenceJson: true } }, approvals: { select: { decision: true, groupRoleAtApproval: true, approvedAt: true } }, repairRuns: { include: { mergeRequest: true } } },
+        include: { events: { orderBy: { sourceTimestamp: "asc" }, take: 100, select: { sourceTimestamp: true, logEvidenceJson: true, traceId: true, requestId: true, dataSourceConnectionId: true } }, project: { select: { pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { pathWithNamespace: true } } } }, errorEvent: { select: { sourceTimestamp: true, logEvidenceJson: true } }, approvals: { select: { decision: true, groupRoleAtApproval: true, approvedAt: true } }, repairRuns: { include: { mergeRequest: true } } },
       });
       if (!task) { sendJson(res, 404, { message: "任务不存在" }); return; }
       sendJson(res, 200, {
@@ -278,6 +291,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         repositories: task.repositories.map(({ project }) => project.pathWithNamespace),
         status: task.status,
         priority: task.priority,
+        occurrenceCount: task.occurrenceCount, requestCount: task.requestCount,
+        firstSeenAt: task.firstSeenAt, lastSeenAt: task.lastSeenAt,
+        evidenceVersion: task.evidenceVersion, analyzedVersion: task.analyzedVersion,
+        groupedLogs: task.events, mergedIntoTaskId: task.mergedIntoTaskId,
         detectedAt: task.errorEvent.sourceTimestamp.toISOString(),
         logEvidence: task.errorEvent.logEvidenceJson,
         investigation: task.investigationResultJson,

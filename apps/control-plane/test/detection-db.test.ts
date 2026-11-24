@@ -7,7 +7,7 @@ import { PrismaSlsDetectionStore } from "../dist/detection/prisma.js";
 import { PrismaSlsDataSourceWriter, PrismaSlsVerificationStore } from "../dist/integrations/sls/prisma.js";
 import { parseEncryptedSecret } from "../dist/integrations/gitlab/types.js";
 
-test("SLS detection persists one task per source position and rolls back failures", { skip: !process.env.DATABASE_URL }, async () => {
+test("SLS detection persists deduplicated evidence and grouped tasks and rolls back failures", { skip: !process.env.DATABASE_URL }, async () => {
   const database = await isolatedDatabase(process.env.DATABASE_URL!);
   const { prisma } = database;
   const key = randomBytes(32);
@@ -116,14 +116,14 @@ test("SLS detection persists one task per source position and rolls back failure
     };
     const a = { sourcePositionKey: "shard:0:cursor:a:ordinal:0", record };
     const b = { sourcePositionKey: "shard:0:cursor:a:ordinal:1", record };
-    assert.equal(await store.persist(source, [a, b, { sourcePositionKey: "normal", record: { __time__: 1794818108, level: 30, msg: "request completed" } }]), 2);
+    assert.equal(await store.persist(source, [a, b, { sourcePositionKey: "normal", record: { __time__: 1794818108, level: 30, msg: "request completed" } }]), 1);
     assert.equal(await store.persist(source, [a, b]), 0);
     assert.equal(await prisma.errorEvent.count({ where: { dataSourceConnectionId: connection.id } }), 2);
     const events = await prisma.errorEvent.findMany({ where: { dataSourceConnectionId: connection.id }, orderBy: { sourcePositionKey: "asc" } });
     assert.equal(events[0]?.fingerprint, events[1]?.fingerprint);
     assert.doesNotMatch(JSON.stringify(events), /must-not-persist/);
-    assert.equal(await prisma.investigationTask.count({ where: { projectId: project.id, status: "INVESTIGATION_PENDING", priority: "HIGH" } }), 2);
-    assert.equal(await prisma.outboxMessage.count({ where: { eventType: "InvestigationRequested", task: { projectId: project.id } } }), 2);
+    assert.equal(await prisma.investigationTask.count({ where: { projectId: project.id, status: "INVESTIGATION_PENDING", priority: "HIGH" } }), 1);
+    assert.equal(await prisma.outboxMessage.count({ where: { eventType: "InvestigationRequested", task: { projectId: project.id } } }), 1);
 
     await store.persist(source, [{
       sourcePositionKey: "long-content",
@@ -149,10 +149,10 @@ test("SLS detection persists one task per source position and rolls back failure
     await assert.rejects(store.persist(source, many));
     assert.equal(await prisma.errorEvent.count({ where: { dataSourceConnectionId: connection.id } }), 104);
     const corrected = many.map((log) => ({ ...log, record: { ...log.record, __time__: 1794818108 } }));
-    assert.equal(await store.persist(source, corrected), 1);
     assert.equal(await store.persist(source, corrected), 0);
-    assert.equal(await prisma.investigationTask.count({ where: { projectId: project.id } }), 105);
-    assert.equal(await prisma.outboxMessage.count({ where: { task: { projectId: project.id } } }), 105);
+    assert.equal(await store.persist(source, corrected), 0);
+    assert.equal(await prisma.investigationTask.count({ where: { projectId: project.id } }), 4);
+    assert.equal(await prisma.outboxMessage.count({ where: { task: { projectId: project.id } } }), 4);
 
     await assert.rejects(store.persist({ id: connection.id, projectId: randomUUID() }, [{ sourcePositionKey: "rollback", record }]));
     assert.equal(await prisma.errorEvent.count({ where: { dataSourceConnectionId: connection.id } }), 105);
