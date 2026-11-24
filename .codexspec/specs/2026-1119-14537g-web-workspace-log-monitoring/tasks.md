@@ -258,3 +258,10 @@ All testable tasks include individually traceable Test Scenarios. No task is out
 - 支持本机 `YUANXI_BASE_URL`、`YUANXI_API_KEY`、`YUANXI_MODEL` 配置；公司配置统一覆盖继承的旧服务设置，启动先 `/key-check`，失败不领取调查任务。修复显式 API Key 被 OPENROUTER_API_KEY 覆盖的问题。
 - 已确认 Base URL 为 `https://yuanxi.xrtan.cn/yuanxi/v1`。现有本机 Key 在公司 `/key-check` 仍返回 401；真实模型调查验收需等待有效源曦 Key 和模型 ID，不得以模拟输出代替。
 - build/lint/typecheck、shell/JavaScript 语法检查和全部 75 项测试通过（新增 8 项模型配置与鉴权检查测试，数据库测试未跳过）。本机新启动流程验证配置缺失即退出；旧无效 OpenRouter 调查进程已停止，Web 与 SLS 消费仍运行。
+
+### 2026-11-24 公司模型真实调查验证完成
+
+- 用户在本机配置有效源曦凭据和 `gpt-6.1-sol` 模型；`/key-check` 返回 HTTP 200 + `valid=true`，严格 JSON Schema 的 `/chat/completions` 请求返回 HTTP 200 且结果结构校验通过。
+- 本机 Holmes 服务和调查 Worker 已启动。原队列任务与重新入队的 10 张旧 401 失败任务共 12 张，全部真实调查完成并进入 AWAITING_APPROVAL；逐项确认结果非空、`analyzedVersion=evidenceVersion`，没有审批和修复执行记录。
+- 浏览器验证卡片聚合计数、调查详情中的中文结论、根因、修复建议和同请求上下文可见。真实样本包含 4 条错误、2 次请求，并取得关联日志和仓库位置取证；模型明确保留缺失具体响应字段/业务源码时的归因不确定性。
+- 此记录仅通过公司模型调查链路验收，不代表代码修复、MR 或修复后 SLS 复查已完成；这些步骤仍需人工审批及后续验证。运行日志检查未发现模型 Key 或认证异常。
