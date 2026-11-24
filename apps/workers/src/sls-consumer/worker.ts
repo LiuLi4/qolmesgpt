@@ -2,7 +2,7 @@ import type { EnabledSlsSource, PrismaSlsDetectionStore } from "@qolmesgpt/contr
 import { AliyunSlsConsumerProtocol } from "./protocol.js";
 import { consumeShard } from "./consume.js";
 
-type Store = Pick<PrismaSlsDetectionStore, "listEnabled" | "persist" | "setState" | "claim" | "renew" | "release">;
+type Store = Pick<PrismaSlsDetectionStore, "listEnabled" | "persist" | "setState" | "claim" | "renew" | "release"> & Partial<Pick<PrismaSlsDetectionStore, "recordBatch">>;
 type Protocol = Pick<AliyunSlsConsumerProtocol, "ensureConsumerGroup" | "heartbeat" | "getCheckpoints" | "getCursor" | "pullLogs" | "updateCheckpoint">;
 type ProtocolFactory = (source: EnabledSlsSource, group: string, workerId: string) => Protocol;
 
@@ -120,7 +120,10 @@ export async function runSlsSource(
               await protocol.updateCheckpoint(ownedShard, nextCursor);
             },
           };
-          const result = await consumeShard(fenced, shard, cursor, (logs) => store.persist(source, logs, workerId).then(() => undefined));
+          const result = await consumeShard(fenced, shard, cursor, async (logs) => {
+            const created = await store.persist(source, logs, workerId);
+            await store.recordBatch?.(source, logs, created, workerId);
+          });
           cursors.set(shard, result.cursor);
           if (result.cursor !== cursor) {
             progressed = true;

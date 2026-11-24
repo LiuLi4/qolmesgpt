@@ -48,6 +48,9 @@ importers:
       '@qolmesgpt/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@qolmesgpt/workers':
+        specifier: workspace:*
+        version: link:../workers
 
   apps/workers:
     dependencies:

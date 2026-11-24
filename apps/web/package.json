@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@qolmesgpt/control-plane": "workspace:*",
-    "@qolmesgpt/security": "workspace:*"
+    "@qolmesgpt/security": "workspace:*",
+    "@qolmesgpt/workers": "workspace:*"
   }
 }

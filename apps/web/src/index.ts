@@ -1,3 +1,4 @@
+import { backfillSls, AliyunSlsConsumerProtocol } from "@qolmesgpt/workers";
 import { GitRepositoryCheckout } from "@qolmesgpt/control-plane";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
@@ -56,7 +57,12 @@ function statusLabel(status: string, approved: boolean): string {
   return labels[status] ?? status;
 }
 
-async function statePayload() {
+function telemetry(source: { enabledAt: Date | null; consumerState: { checkpointSummary: unknown } | null }) {
+  const summary = (source.consumerState?.checkpointSummary ?? {}) as Record<string, unknown>;
+  return { enabledAt: source.enabledAt?.toISOString() ?? null, logsConsumed: Number(summary.logsConsumed ?? 0), tasksCreated: Number(summary.tasksCreated ?? 0), lastLogAt: summary.lastLogAt ?? null, recentLogs: Array.isArray(summary.recentLogs) ? summary.recentLogs : [] };
+}
+
+async function statePayload(workspaceId?: string) {
   const runtime = await getWebRuntime();
   const projects = await runtime.prisma.project.findMany({
     where: { createdByUserId: runtime.userId },
@@ -69,14 +75,15 @@ async function statePayload() {
     orderBy: { updatedAt: "desc" },
   });
   const tasks = await runtime.prisma.investigationTask.findMany({
-    where: { OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
-    orderBy: { updatedAt: "desc" },
+    where: { ...(workspaceId ? { workspaceId } : {}), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] },
+    orderBy: { errorEvent: { sourceTimestamp: "desc" } },
     take: 100,
-    include: { project: { select: { id: true, pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { id: true, pathWithNamespace: true } } } }, errorEvent: { select: { logEvidenceJson: true } }, approvals: { select: { decision: true, approvedAt: true }, take: 1 } },
+    include: { project: { select: { id: true, pathWithNamespace: true } }, workspace: { select: { group: { select: { fullPath: true } } } }, repositories: { select: { project: { select: { id: true, pathWithNamespace: true } } } }, errorEvent: { select: { logEvidenceJson: true, sourceTimestamp: true } }, approvals: { select: { decision: true, approvedAt: true }, take: 1 } },
   });
   const sources = [...projects.flatMap((project) => project.dataSources.map((source) => {
     const config = source.configJson as Record<string, unknown>;
     return {
+      ...telemetry(source),
       id: source.id,
       projectId: project.id,
       name: "Aliyun SLS",
@@ -91,6 +98,7 @@ async function statePayload() {
       lagging: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.lagging ?? null,
     };
   })), ...groupWorkspaces.flatMap((workspace) => workspace.dataSources.map((source) => ({
+    ...telemetry(source),
     id: source.id,
     workspaceId: workspace.id,
     projectId: null,
@@ -106,14 +114,14 @@ async function statePayload() {
     lagging: (source.consumerState?.checkpointSummary as Record<string, unknown> | null)?.lagging ?? null,
   })))];
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const errorCount = await runtime.prisma.errorEvent.count({ where: { sourceTimestamp: { gte: cutoff }, dataSourceConnection: { OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] } } });
+  const errorCount = await runtime.prisma.errorEvent.count({ where: { sourceTimestamp: { gte: cutoff }, dataSourceConnection: { ...(workspaceId ? { workspaceId } : {}), OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] } } });
   return {
     projects: projects.map((project) => ({
       id: project.id,
       name: project.pathWithNamespace.split("/").at(-1) ?? project.pathWithNamespace,
       repository: project.pathWithNamespace,
       workspace: project.workspace?.relativePath ?? "未建立",
-      detection: project.dataSources.length ? "SLS staging" : "未配置",
+      detection: project.dataSources.length || groupWorkspaces.some((workspace) => workspace.repositories.some((entry) => entry.project.id === project.id) && workspace.dataSources.length) ? "SLS 已接入" : "未配置",
       status: project.workspace?.status === "FAILED" ? "attention" : "healthy",
       health: project.workspace?.status === "READY" ? 100 : project.workspace ? 60 : 25,
     })),
@@ -131,10 +139,17 @@ async function statePayload() {
       const approval = task.approvals[0];
       return {
         id: task.id,
+        workspaceId: task.workspaceId,
+        detectedAt: task.errorEvent.sourceTimestamp.toISOString(),
+        logEvidence: task.errorEvent.logEvidenceJson,
         projectId: task.projectId,
         project: task.project?.pathWithNamespace ?? task.workspace?.group.fullPath ?? "Group Workspace",
         repositories: task.repositories.map(({ project }) => project.pathWithNamespace),
-        title: `日志错误事件 ${task.errorEvent.logEvidenceJson && typeof task.errorEvent.logEvidenceJson === "object" ? String((task.errorEvent.logEvidenceJson as Record<string, unknown>).msg ?? "需要调查") : "需要调查"}`,
+        title: (() => {
+          const log = (task.errorEvent.logEvidenceJson ?? {}) as Record<string, unknown>;
+          const content = typeof log.content === "object" && log.content ? log.content as Record<string, unknown> : {};
+          return String(log.msg ?? log.message ?? content.msg ?? content.message ?? "日志错误，需要调查").slice(0, 300);
+        })(),
         status: task.status,
         statusLabel: statusLabel(task.status, approval?.decision === "APPROVED"),
         approved: approval?.decision === "APPROVED",
@@ -199,7 +214,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   }
   try {
     if (req.method === "GET" && url.pathname === "/api/state") {
-      sendJson(res, 200, await statePayload());
+      sendJson(res, 200, await statePayload(url.searchParams.get("workspaceId") || undefined));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/sls/backfill") {
+      const runtime = await getWebRuntime();
+      const body = await readBody(req);
+      const sourceId = String(body.sourceId ?? "");
+      const allowed = await runtime.prisma.dataSourceConnection.findFirst({ where: { id: sourceId, status: "ENABLED", OR: [{ project: { createdByUserId: runtime.userId } }, { workspace: { group: { connection: { userId: runtime.userId } } } }] }, select: { id: true } });
+      if (!allowed) throw new Error("Enabled data source not found");
+      const [source] = await runtime.detection.listEnabled(sourceId);
+      if (!source) throw new Error("Data source credentials unavailable");
+      let cursors: Record<string, string> | undefined;
+      if (body.cursors !== undefined) {
+        if (!body.cursors || typeof body.cursors !== "object" || Array.isArray(body.cursors) || Object.keys(body.cursors).length > 1024 || Object.entries(body.cursors).some(([key, value]) => !/^\d+$/.test(key) || typeof value !== "string" || value.length > 512)) throw new Error("Invalid historical cursors");
+        cursors = body.cursors as Record<string, string>;
+      }
+      try {
+        const protocol = new AliyunSlsConsumerProtocol({ ...source, consumerId: "historical-read-only" });
+        const result = await backfillSls(protocol, new Date(String(body.from)), new Date(String(body.to)), (logs) => runtime.detection.persist(source, logs), cursors);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        const message = errorMessage(error);
+        throw new Error(message.startsWith("Historical") || message.startsWith("Invalid historical") ? message : "历史日志补查失败，请检查 SLS 权限和时间范围；已生成任务会保留，重试会去重。");
+      }
       return;
     }
     const slsVerify = req.method === "POST" && url.pathname === "/api/sls/verify";
@@ -331,7 +369,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     }
     sendJson(res, 404, { detail: "Not Found" });
   } catch (error) {
-    sendJson(res, statusForError(error), { ok: false, message: errorMessage(error) });
+    sendJson(res, statusForError(error), { ok: false, message: url.pathname === "/api/sls/backfill" && !/^(Historical|Invalid historical)/.test(errorMessage(error)) ? "历史补查失败，请检查数据库与 SLS 服务。已生成的任务会保留，重试会按日志位置去重。" : errorMessage(error) });
   }
 }
 

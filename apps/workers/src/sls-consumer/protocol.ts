@@ -211,6 +211,11 @@ export class AliyunSlsConsumerProtocol {
 
   async pullLogs(shard: number, cursor: string, count = DEFAULT_PULL_COUNT): Promise<SlsPulledBatch> {
     this.assertAssignedShard(shard);
+    return this.readLogs(shard, cursor, count);
+  }
+
+  async readLogs(shard: number, cursor: string, count = DEFAULT_PULL_COUNT): Promise<SlsPulledBatch> {
+    this.assertShard(shard);
     if (!cursor) throw new Error("SLS cursor is required");
     if (!Number.isInteger(count) || count < 1 || count > MAX_PULL_COUNT) throw new Error(`SLS pull count must be between 1 and ${MAX_PULL_COUNT}`);
     const path = `/logstores/${encodeURIComponent(this.config.logstore)}/shards/${shard}`;

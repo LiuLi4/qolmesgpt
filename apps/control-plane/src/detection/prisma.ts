@@ -101,9 +101,9 @@ export class PrismaSlsDetectionStore {
     return renewed.count === 1;
   }
 
-  async listEnabled(): Promise<EnabledSlsSource[]> {
+  async listEnabled(connectionId?: string): Promise<EnabledSlsSource[]> {
     const connections = await this.prisma.dataSourceConnection.findMany({
-      where: { status: "ENABLED", type: "ALIYUN_SLS" },
+      where: { status: "ENABLED", type: "ALIYUN_SLS", ...(connectionId ? { id: connectionId } : {}) },
       select: { id: true, projectId: true, workspaceId: true, configJson: true, credentialsCiphertext: true, updatedAt: true, enabledAt: true },
     });
     const enabled: EnabledSlsSource[] = [];
@@ -186,10 +186,30 @@ export class PrismaSlsDetectionStore {
     return created;
   }
 
+  async recordBatch(source: EnabledSlsSource, logs: readonly DetectionLog[], created: number, workerId: string): Promise<void> {
+    if (!logs.length) return;
+    const current = await this.prisma.sLSConsumerState.findUnique({ where: { connectionId: source.id } });
+    const summary = object(current?.checkpointSummary);
+    const recentLogs = logs.slice(-5).map(({ record }) => evidence(record, [source.accessKeyId, source.accessKeySecret, source.securityToken ?? ""]));
+    const result = await this.prisma.sLSConsumerState.updateMany({
+      where: { connectionId: source.id, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED" } },
+      data: { checkpointSummary: {
+        ...summary as Prisma.InputJsonObject,
+        logsConsumed: Number(summary.logsConsumed ?? 0) + logs.length,
+        tasksCreated: Number(summary.tasksCreated ?? 0) + created,
+        lastLogAt: new Date(Math.max(...logs.map((log) => sourceTimestamp(log.record).getTime()))).toISOString(),
+        recentLogs,
+      } },
+    });
+    if (result.count !== 1) throw new Error("SLS worker lost its connection lease");
+  }
+
   async setState(connectionId: string, consumerGroup: string, workerId: string, status: "STARTING" | "RUNNING" | "DEGRADED" | "STOPPED" | "FAILED", assignments: readonly number[], summary: Record<string, string | number | boolean | null>): Promise<void> {
+    const previous = object((await this.prisma.sLSConsumerState.findUnique({ where: { connectionId } }))?.checkpointSummary);
+    const metrics = Object.fromEntries(["logsConsumed", "tasksCreated", "lastLogAt", "recentLogs"].filter((key) => key in previous).map((key) => [key, previous[key]])) as Prisma.InputJsonObject;
     const result = await this.prisma.sLSConsumerState.updateMany({
       where: { connectionId, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED" } },
-      data: { consumerGroup, status, shardAssignments: [...assignments], checkpointSummary: summary, ...(status === "RUNNING" ? { lastHeartbeatAt: new Date() } : {}) },
+      data: { consumerGroup, status, shardAssignments: [...assignments], checkpointSummary: { ...metrics, ...summary }, ...(status === "RUNNING" ? { lastHeartbeatAt: new Date() } : {}) },
     });
     if (result.count !== 1) throw new Error("SLS worker lost its connection lease");
   }

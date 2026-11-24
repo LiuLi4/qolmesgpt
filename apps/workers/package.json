@@ -17,5 +17,7 @@
     "@qolmesgpt/control-plane": "workspace:*",
     "@qolmesgpt/security": "workspace:*",
     "protobufjs": "6.11.6"
-  }
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
 }

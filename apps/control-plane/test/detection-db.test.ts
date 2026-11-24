@@ -68,6 +68,17 @@ test("SLS detection persists one task per source position and rolls back failure
     const source = (await store.listEnabled()).find((item) => item.id === connection.id);
     assert.ok(source);
     assert.equal(source.accessKeySecret, "secret");
+    assert.equal(await store.claim(connection.id, "qolmesgpt-test", "metrics-worker"), true);
+    await store.recordBatch(source, [{ sourcePositionKey: "normal-preview", record: { __time__: 1794818108, level: 30, msg: "request completed password=customer-secret", content: '{"token":"preview-token"}' } }], 0, "metrics-worker");
+    await store.setState(connection.id, "qolmesgpt-test", "metrics-worker", "RUNNING", [0], { lagging: false });
+    const telemetry = (await prisma.sLSConsumerState.findUniqueOrThrow({ where: { connectionId: connection.id } })).checkpointSummary as Record<string, unknown>;
+    assert.equal(telemetry.logsConsumed, 1);
+    assert.equal(telemetry.tasksCreated, 0);
+    assert.equal(telemetry.lastLogAt, new Date(1794818108000).toISOString());
+    assert.doesNotMatch(JSON.stringify(telemetry), /customer-secret|preview-token/);
+    await assert.rejects(store.recordBatch(source, [{ sourcePositionKey: "x", record: { __time__: 1 } }], 0, "other-worker"), /lease/);
+    await store.release(connection.id, "metrics-worker");
+
     const invalidProject = await prisma.project.create({
       data: { connectionId: gitlab.id, groupId: group.id, externalProjectId: "2", pathWithNamespace: "test/invalid", defaultBranch: "main", createdByUserId: user.id },
     });

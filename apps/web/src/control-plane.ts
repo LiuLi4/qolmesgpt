@@ -10,6 +10,7 @@ import {
   PrismaOAuthStateStore,
   PrismaPg,
   PrismaSlsDataSourceWriter,
+  PrismaSlsDetectionStore,
   PrismaSlsVerificationStore,
   gitBeakerApiFactory,
 } from "@qolmesgpt/control-plane";
@@ -20,6 +21,7 @@ export interface WebRuntime {
   readonly prisma: InstanceType<typeof PrismaClient>;
   readonly userId: string;
   readonly sls: DataSourceRoutes;
+  readonly detection: PrismaSlsDetectionStore;
   readonly gitlab: GitLabService;
   readonly workspaces: GroupWorkspaceService;
   readonly approvals: ApprovalRoutes;
@@ -65,7 +67,7 @@ async function createRuntime(): Promise<WebRuntime> {
     new PrismaSlsVerificationStore(prisma, cipher),
   );
   const approvals = new ApprovalRoutes(new PrismaApprovalStore(prisma), gitlab);
-  return { prisma, userId: user.id, sls, gitlab, workspaces, approvals, close: () => prisma.$disconnect() };
+  return { prisma, userId: user.id, sls, detection: new PrismaSlsDetectionStore(prisma, keys), gitlab, workspaces, approvals, close: () => prisma.$disconnect() };
 }
 
 export async function getWebRuntime(): Promise<WebRuntime> {
