@@ -48,9 +48,9 @@ test("request grouping, fingerprint windows, concurrency, approvals and investig
     assert.equal(task.evidenceVersion, 4);
     assert.equal(task.firstSeenAt.getTime(), time * 1000);
     assert.equal(task.lastSeenAt.getTime(), (time + 3) * 1000);
-    // Out-of-order logs preserve min/max; a different request outside the fingerprint window is separate.
+    // Out-of-order logs preserve min/max; a different fingerprint remains separate.
     await store.persist(source, [log("e", "trace1", "earlier causal exception", -10)]);
-    assert.equal(await store.persist(source, [log("f", "trace3", "database failed 999", 901)]), 1);
+    assert.equal(await store.persist(source, [log("f", "trace3", "different failure 999", 901)]), 1);
     task = await p.investigationTask.findUniqueOrThrow({ where: { id: task.id } });
     assert.equal(task.firstSeenAt.getTime(), (time - 10) * 1000);
     assert.equal(task.lastSeenAt.getTime(), (time + 3) * 1000);
@@ -88,6 +88,48 @@ test("request grouping, fingerprint windows, concurrency, approvals and investig
   } finally { await db.close(); }
 });
 
+
+test("unresolved fingerprints persist across time gaps and historical unapproved duplicates merge without losing evidence", { skip: !process.env.DATABASE_URL }, async () => {
+  const db = await isolatedDatabase(process.env.DATABASE_URL!);
+  const p = db.prisma;
+  try {
+    const user = await p.user.create({ data: { authSubject: randomUUID() } });
+    const connection = await p.gitLabConnection.create({ data: { userId: user.id, instanceUrl: "https://example.test", authType: "PAT", accessTokenCiphertext: "test", credentialKeyVersion: "v1" } });
+    const group = await p.gitLabGroup.create({ data: { connectionId: connection.id, externalGroupId: "1", fullPath: "group" } });
+    const workspace = await p.groupWorkspace.create({ data: { groupId: group.id, relativePath: "group", status: "READY" } });
+    const source = await p.dataSourceConnection.create({ data: { workspaceId: workspace.id, type: "ALIYUN_SLS", status: "ENABLED", configJson: {}, credentialsCiphertext: "test", credentialKeyVersion: "v1" } });
+    const store = new PrismaSlsDetectionStore(p, { getKey: () => Buffer.alloc(32) });
+    const scope = { id: source.id, workspaceId: workspace.id, projectId: null };
+    const time = 1795508547;
+    const log = (position: string, offset: number, status = "502") => ({ sourcePositionKey: position, record: { __time__: time + offset, service: "ec-saas", component: "domain", level: 50, method: "POST", status, msg: "request completed", traceId: position } });
+    await store.persist(scope, [log("first-request", 0)]);
+    const original = await p.investigationTask.findFirstOrThrow();
+    await p.investigationTask.update({ where: { id: original.id }, data: { status: "AWAITING_APPROVAL", analyzedVersion: 1, investigationResultJson: { summary: "previous evidence" } } });
+    assert.equal(await store.persist(scope, [log("new-request", 91 * 60)]), 0, "an unresolved identical fingerprint must reuse the task after 91 minutes");
+    let main = await p.investigationTask.findUniqueOrThrow({ where: { id: original.id } });
+    assert.equal(main.status, "INVESTIGATION_PENDING");
+    assert.equal(main.occurrenceCount, 2);
+    assert.equal(main.requestCount, 2);
+    assert.equal(main.investigationResultJson, null);
+    assert.equal(main.analyzedVersion, 0);
+    assert.equal(await store.persist(scope, [log("different-status", 92 * 60, "503")]), 1);
+    const historical = log("historical-duplicate", 93 * 60);
+    const event = await p.errorEvent.create({ data: { dataSourceConnectionId: source.id, sourcePositionKey: historical.sourcePositionKey, sourceTimestamp: new Date(historical.record.__time__ * 1000), logEvidenceJson: historical.record, ...aggregationIdentity(historical.record) } });
+    const duplicate = await p.investigationTask.create({ data: { workspaceId: workspace.id, errorEventId: event.id, status: "AWAITING_APPROVAL", firstSeenAt: event.sourceTimestamp, lastSeenAt: event.sourceTimestamp, investigationResultJson: { summary: "historical result" } } });
+    await p.errorEvent.update({ where: { id: event.id }, data: { taskId: duplicate.id } });
+    assert.equal(await store.reconcilePending(true), 1);
+    assert.equal((await p.investigationTask.findUniqueOrThrow({ where: { id: duplicate.id } })).mergedIntoTaskId, original.id);
+    assert.equal(await p.errorEvent.count({ where: { taskId: original.id } }), 3);
+    main = await p.investigationTask.findUniqueOrThrow({ where: { id: original.id } });
+    assert.equal(main.occurrenceCount, 3);
+    assert.equal(main.lastSeenAt.getTime(), (time + 93 * 60) * 1000);
+    assert.equal(await store.reconcilePending(true), 0);
+    await p.approval.create({ data: { taskId: original.id, approverUserId: user.id, groupRoleAtApproval: "DEVELOPER", decision: "APPROVED", roleCheckedAt: new Date() } });
+    assert.equal(await store.persist(scope, [log("after-approval", 94 * 60)]), 1);
+    assert.equal((await p.investigationTask.findUniqueOrThrow({ where: { id: original.id } })).occurrenceCount, 3);
+  } finally { await db.close(); }
+});
+
 test("context collection filters exact request IDs, redacts secrets and reads only bounded checkout code", async () => {
   const root = await mkdtemp(join(tmpdir(), "qolmes-context-"));
   try {
@@ -109,4 +151,61 @@ test("context collection filters exact request IDs, redacts secrets and reads on
     assert.doesNotMatch(output, /customer-secret|credential-secret|private token|unrelated|export const domain/);
     assert.match(output, /contextDiagnostics/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("investigation snapshots cover all task statistics and retain older causal events", { skip: !process.env.DATABASE_URL }, async () => {
+  const db = await isolatedDatabase(process.env.DATABASE_URL!);
+  const p = db.prisma;
+  try {
+    const user = await p.user.create({ data: { authSubject: randomUUID() } });
+    const connection = await p.gitLabConnection.create({ data: { userId: user.id, instanceUrl: "https://example.test", authType: "PAT", accessTokenCiphertext: "test", credentialKeyVersion: "v1" } });
+    const group = await p.gitLabGroup.create({ data: { connectionId: connection.id, externalGroupId: "1", fullPath: "group" } });
+    const workspace = await p.groupWorkspace.create({ data: { groupId: group.id, relativePath: "group", status: "READY" } });
+    const source = await p.dataSourceConnection.create({ data: { workspaceId: workspace.id, type: "ALIYUN_SLS", configJson: {}, credentialsCiphertext: "test", credentialKeyVersion: "v1" } });
+    const rows = [];
+    for (let i = 0; i < 48; i++) {
+      rows.push({ dataSourceConnectionId: source.id, sourcePositionKey: `completed-${i}`, sourceTimestamp: new Date(1795500000000 + i * 1000), correlationKey: `trace:t${i}`, traceId: `t${i}`, fingerprint: "502", logEvidenceJson: { msg: "request completed", status: 502, traceId: `t${i}` } });
+      if (i < 9) for (const msg of ["金融商响应异常", "finance user-auth 上游异常"]) rows.push({ dataSourceConnectionId: source.id, sourcePositionKey: `${msg}-${i}`, sourceTimestamp: new Date(1795490000000 + i * 1000), correlationKey: `trace:t${i}`, traceId: `t${i}`, fingerprint: msg, logEvidenceJson: { content: { msg, status: 503, errorCode: "C0001", traceId: `t${i}` } } });
+    }
+    await p.errorEvent.createMany({ data: rows });
+    const anchor = await p.errorEvent.findFirstOrThrow();
+    const task = await p.investigationTask.create({ data: { workspaceId: workspace.id, errorEventId: anchor.id, occurrenceCount: 66, requestCount: 48 } });
+    await p.errorEvent.updateMany({ data: { taskId: task.id } });
+    await p.outboxMessage.create({ data: { aggregateType: "InvestigationTask", aggregateId: task.id, eventType: "InvestigationRequested", payload: {} } });
+    const job = await new PrismaInvestigationStore(p).claim("tester");
+    assert.ok(job);
+    assert.equal(job.evidenceSummary?.totalLogs, 66);
+    assert.equal(job.evidenceSummary?.totalRequests, 48);
+    assert.equal(job.evidenceSummary?.requestsWithDiagnosticLogs, 9);
+    assert.equal(job.evidenceSummary?.requestsWithoutDiagnosticLogs, 39);
+    assert.equal(job.relatedLogs.length, 66);
+    assert.match(JSON.stringify(job.relatedLogs), /金融商响应异常/);
+    assert.equal(job.evidenceSummary?.messageTypes.find((t) => t.message === "金融商响应异常")?.logs, 9);
+    await p.errorEvent.createMany({ data: Array.from({ length: 300 }, (_, i) => ({ taskId: task.id, dataSourceConnectionId: source.id, sourcePositionKey: `extra-${i}`, sourceTimestamp: new Date(1795600000000 + i * 1000), correlationKey: `trace:extra-${i}`, traceId: `extra-${i}`, fingerprint: "502", logEvidenceJson: { msg: "request completed", status: 502 } })) });
+    const first = await p.outboxMessage.findFirstOrThrow();
+    await p.outboxMessage.update({ where: { id: first.id }, data: { claimOwner: null, claimedAt: null } });
+    const larger = await new PrismaInvestigationStore(p).claim("tester-2");
+    assert.equal(larger?.evidenceSummary?.totalLogs, 366);
+    assert.equal(larger?.evidenceSummary?.totalRequests, 348);
+    assert.equal(larger?.evidenceSummary?.requestsWithDiagnosticLogs, 9);
+    assert.equal(larger?.relatedLogs.length, 200);
+    const snapshot = JSON.stringify(larger?.relatedLogs);
+    assert.match(snapshot, /金融商响应异常/);
+    assert.match(snapshot, /finance user-auth 上游异常/);
+
+  } finally { await db.close(); }
+});
+
+
+test("context searches a diagnostic request before unrelated recent completion requests", async () => {
+  const queries: string[] = [];
+  const source = { id: "s", workspaceId: "w", endpoint: "https://cn-shanghai.log.aliyuncs.com", project: "p", logstore: "l", accessKeyId: "id", accessKeySecret: "secret" };
+  const adapter = new AliyunSlsAdapter({ create: () => ({ getProject: async () => ({}), getLogStore: async () => ({}), getLogs: async (_project: string, _store: string, _from: Date, _to: Date, params: { query: string }) => { queries.push(params.query); return []; } }) });
+  const rows = Array.from({ length: 12 }, (_, i) => ({ timestamp: "2026-11-24T10:00:00Z", correlationKey: `trace:completion-${i}`, traceId: `completion-${i}`, log: { msg: "request completed", status: 502 } }));
+  rows.push({ timestamp: "2026-11-24T09:00:00Z", correlationKey: "trace:causal", traceId: "causal", log: { msg: "finance user-auth 上游异常", status: 503 } });
+  const job = { outboxId: "o", taskId: "t", projectId: null, workspaceId: "w", errorEventId: "e", errorEvidence: {}, relatedLogs: rows, evidenceVersion: 1, projectPath: "g", workspacePath: null, attempts: 1 };
+  await prepareInvestigation(job, { listEnabled: async () => [source] } as unknown as PrismaSlsDetectionStore, "/missing-checkout", adapter);
+  assert.match(queries[0]!, /causal/);
+  assert.equal(queries.length, 6);
 });

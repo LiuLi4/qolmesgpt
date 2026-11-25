@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-export const FINGERPRINT_WINDOW_MS = 15 * 60_000;
 export const REQUEST_WINDOW_MS = 60 * 60_000;
 export const AGGREGATION_DELAY_MS = 10_000;
 

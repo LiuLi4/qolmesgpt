@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import test from "node:test";
+import { encryptSecret } from "@qolmesgpt/security";
+import { isolatedDatabase } from "./database-fixture.ts";
+import { PrismaSlsDetectionStore } from "../dist/detection/prisma.js";
+import { PrismaInvestigationStore } from "../dist/investigation/prisma.js";
+import { WorkspaceAutomationService } from "../dist/workspace/automation.js";
+
+test("workspace pause fences consumers and investigation claims, persists, and resumes without losing evidence or checkpoints", { skip: !process.env.DATABASE_URL }, async () => {
+  const db = await isolatedDatabase(process.env.DATABASE_URL!);
+  const p = db.prisma;
+  try {
+    const user = await p.user.create({ data: { authSubject: randomUUID() } });
+    const outsider = await p.user.create({ data: { authSubject: randomUUID() } });
+    const connection = await p.gitLabConnection.create({ data: { userId: user.id, instanceUrl: "https://example.test", authType: "PAT", accessTokenCiphertext: "test", credentialKeyVersion: "v1" } });
+    const group = await p.gitLabGroup.create({ data: { connectionId: connection.id, externalGroupId: "1", fullPath: "group" } });
+    const workspace = await p.groupWorkspace.create({ data: { groupId: group.id, relativePath: "group", status: "READY" } });
+    const keys = { getKey: () => Buffer.alloc(32) };
+    const source = await p.dataSourceConnection.create({ data: { workspaceId: workspace.id, type: "ALIYUN_SLS", status: "ENABLED", configJson: { endpoint: "https://cn-shanghai.log.aliyuncs.com", project: "logs", logstore: "staging" }, credentialsCiphertext: JSON.stringify(encryptSecret(JSON.stringify({ accessKeyId: "id", accessKeySecret: "secret" }), "v1", keys)), credentialKeyVersion: "v1", enabledAt: new Date() } });
+    const detection = new PrismaSlsDetectionStore(p, keys);
+    const investigations = new PrismaInvestigationStore(p);
+    const automation = new WorkspaceAutomationService(p);
+    const scope = { id: source.id, workspaceId: workspace.id, projectId: null };
+    await detection.persist(scope, [{ sourcePositionKey: "one", record: { __time__: 1794818108, level: 50, msg: "error" } }]);
+    assert.equal((await detection.listEnabled()).length, 1);
+    assert.equal(await detection.claim(source.id, "group", "consumer"), true);
+    await p.sLSConsumerState.update({ where: { connectionId: source.id }, data: { checkpointSummary: { lastCheckpoint: "saved-cursor", logsConsumed: 1 } } });
+    const job = await investigations.claim("analyst", new Date(Date.now() + 120000));
+    assert.ok(job);
+    await assert.rejects(automation.set(outsider.id, workspace.id, false), /not found/);
+    assert.equal((await p.groupWorkspace.findUniqueOrThrow({ where: { id: workspace.id } })).automationEnabled, true);
+    await automation.set(user.id, workspace.id, false);
+    assert.equal((await new WorkspaceAutomationService(p).set(user.id, workspace.id, false)).automationEnabled, false);
+    assert.deepEqual(await detection.listEnabled(), []);
+    assert.equal(await detection.renew(source.id, "consumer"), false);
+    assert.equal(await detection.claim(source.id, "group", "new-consumer"), false);
+    assert.equal(await investigations.isAutomationEnabled(job.taskId), false);
+    assert.equal(await investigations.claim("new-analyst", new Date(Date.now() + 120000)), null);
+    const state = await p.sLSConsumerState.findUniqueOrThrow({ where: { connectionId: source.id } });
+    assert.deepEqual(state.checkpointSummary, { lastCheckpoint: "saved-cursor", logsConsumed: 1 });
+    assert.equal(state.status, "STOPPED");
+    assert.equal((await p.investigationTask.findUniqueOrThrow({ where: { id: job.taskId } })).status, "INVESTIGATION_PENDING");
+    assert.equal(await p.errorEvent.count(), 1);
+    await assert.rejects(investigations.complete(job.outboxId, "analyst", { summary: "s", rootCause: "r", codeContext: [], proposedFix: "p", confidence: "low" }, job.evidenceVersion), /lease lost/);
+    await automation.set(user.id, workspace.id, true);
+    assert.equal((await detection.listEnabled()).length, 1);
+    assert.equal((await p.dataSourceConnection.findUniqueOrThrow({ where: { id: source.id } })).enabledAt?.getTime(), source.enabledAt?.getTime());
+    assert.equal(await detection.claim(source.id, "group", "new-consumer"), true);
+    const resumed = await investigations.claim("new-analyst", new Date(Date.now() + 120000));
+    assert.equal(resumed?.taskId, job.taskId);
+    assert.equal(resumed?.attempts, 1);
+  } finally { await db.close(); }
+});

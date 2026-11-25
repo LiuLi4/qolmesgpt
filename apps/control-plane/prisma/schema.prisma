@@ -366,6 +366,7 @@ model OutboxMessage {
 }
 
 model GroupWorkspace {
+  automationEnabled Boolean                @default(true)
   id            String          @id @default(uuid()) @db.Uuid
   groupId       String          @unique @db.Uuid
   relativePath  String          @unique

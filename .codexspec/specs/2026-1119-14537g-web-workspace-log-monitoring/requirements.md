@@ -196,8 +196,8 @@
 ### DEC-010: Request aggregation and repeated-error grouping (updated 2026-11-24)
 
 - **Status**: confirmed; supersedes the initial one-card-per-error decision.
-- **Decision**: Preserve every source-position-deduplicated ErrorEvent; aggregate matching requests within the Workspace using traceId then service/requestId. Group normalized fingerprints across requests within a bounded window; preserve counts, first/last timestamps and evidence versions.
-- **Implementation defaults**: Request span 60 minutes; fingerprint span 15 minutes; initial collection delay 10 seconds capped at 60 seconds. Missing request IDs remain individually counted.
+- **Decision**: Preserve every source-position-deduplicated ErrorEvent; aggregate matching requests within the Workspace using traceId then service/requestId. Group normalized fingerprints across requests for as long as the task remains unresolved; preserve counts, first/last timestamps and evidence versions.
+- **Implementation defaults**: Request span 60 minutes; unresolved fingerprint span is unbounded; initial collection delay 10 seconds capped at 60 seconds. Missing request IDs remain individually counted.
 - **Reason**: The latest user request explicitly asks to complete deduplication/request aggregation and invoke HolmesGPT for root-cause investigation.
 - **User Evidence**: “按照错误日志去重、聚合属于一次请求的错误日志信息，调用 HolmesGPT 定位具体错误原因” followed by “补齐”。
 - **Limits**: Approved/repairing/failed/closed tasks do not accept new evidence. Real model output requires working provider credentials. Private repository source contents remain outside model prompts; bounded file/line references are permitted.
@@ -339,3 +339,15 @@
 - **Summary Presented**: 一个 Group 建立 Workspace，包含子 Group 中可访问的全部项目；SLS 绑定 Workspace；调查可跨仓，人工审批后对涉及仓库分别修改、测试并提交 MR。
 - **User Response**: “确认，包含子 Group，按上述范围实现”。
 - **Result**: NEED-009、CON-006、DEC-014 confirmed；原单项目范围 superseded。
+
+### NEED-010: Workspace 自动读取与调查开关（2026-11-24）
+
+- **Status**: confirmed
+- **Statement**: 顶部状态替换为“AI 自动读取日志”开关，控制当前 Workspace 全部数据源的自动读取和 AI 调查；先暂停现有 Workspace，保留历史日志证据与消费进度。
+- **User Evidence**: “改成AI自动读取日志开关，并先暂停日志自动读取并调用分析”。
+
+### 调查详情与重复任务修正（2026-11-24）
+
+- **Status**: confirmed
+- **Statement**: 同一未审批错误指纹不因时间间隔重复建立任务；保留全部证据与历史任务 ID。详情头部展示完整任务 ID，左侧日志、右侧调查结论。
+- **User Evidence**: “这个和任务351c324a是重复的为什么没有识别出来”；“头部要展示任务ID”；“左边显示具体错误日志，右边显示调查结论，改成左右两栏布局”。

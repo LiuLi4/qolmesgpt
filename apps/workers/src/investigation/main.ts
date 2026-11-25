@@ -15,7 +15,7 @@ process.once("SIGTERM", () => controller.abort());
 
 try {
   while (!controller.signal.aborted) {
-    const claimed = await runInvestigationOnce(runtime.store, { investigate: async (job) => client.investigate(await runtime.prepare(job)) }, owner);
+    const claimed = await runInvestigationOnce(runtime.store, { investigate: async (job, signal) => { signal?.throwIfAborted(); const prepared = await runtime.prepare(job); signal?.throwIfAborted(); return client.investigate(prepared, signal); } }, owner);
     if (!claimed) await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 } finally {

@@ -64,11 +64,16 @@ async function openPage(workspaces, sources = [], tasks = []) {
       if (url.startsWith("/api/state")) { stateCalls++; return response(state); }
       if (url === "/api/gitlab/connections") return response({ connections: [{ id: "connection", status: "ACTIVE", instanceUrl: "http://git.example" }] });
       if (url.endsWith("/groups")) return response({ items: [{ id: "group", fullPath: "acme/platform", role: "MAINTAINER" }] });
+      if (/^\/api\/workspaces\/[^/]+\/automation$/.test(url)) {
+        const id = url.split("/")[3]; const enabled = JSON.parse(options.body).enabled;
+        state = { ...state, workspaces: state.workspaces.map((workspace) => workspace.id === id ? { ...workspace, automationEnabled: enabled } : workspace) };
+        return response({ automationEnabled: enabled, message: enabled ? "已开启" : "已暂停" });
+      }
       if (url === "/api/workspaces") { createCalls++; return new Promise((resolve) => { pendingCreate = resolve; }); }
       if (url === "/api/sls/verify") { slsRequests.push(JSON.parse(options.body)); return new Promise((resolve) => { pendingSls = resolve; }); }
       if (url.startsWith("/api/tasks/")) {
         taskDetailCalls++;
-        return response({ ...state.tasks.find((task) => url === `/api/tasks/${task.id}`), approvals: [], groupedLogs: [] });
+        return response({ approvals: [], groupedLogs: [], ...state.tasks.find((task) => url === `/api/tasks/${task.id}`) });
       }
       throw new Error(`Unexpected fixture request: ${url}`);
     },
@@ -249,7 +254,7 @@ test("task detail stays closed after polling and can be reopened without dialog 
     ui.taskCards[0].click();
     await setImmediate();
     assert.equal(dialog.open, true);
-    assert.match(ui.elements.get("task-detail-content").textContent, /错误日志 4 条 · 请求 2 次/);
+    assert.match(ui.elements.get("task-detail-meta").textContent, /错误日志 4 条 · 请求 2 次/);
     await ui.tick();
     await ui.tick();
     const reads = ui.taskDetailCalls;
@@ -263,4 +268,47 @@ test("task detail stays closed after polling and can be reopened without dialog 
     assert.equal(dialog.open, false);
     assert.equal(ui.taskDetailCalls, reads);
   }
+});
+
+test("workspace and log source selectors share the top context and show live log details", () => {
+  assert.match(page, /class="workspace-context"/);
+  assert.match(page, /id="active-workspace" aria-label="切换 Workspace"/);
+  assert.match(page, /id="source-switcher"/);
+  assert.match(page, /id="monitor-source" aria-label="切换日志数据源"/);
+  assert.match(page, /当前日志实时详情/);
+  assert.match(page, /原始日志保留在阿里云 SLS；错误日志与调查结果保存到系统数据库/);
+});
+
+
+test("task detail displays the full task ID and separates error evidence from investigation conclusions", async () => {
+  const task = { id: "351c324a-4034-4384-9ee9-a311b2a1c666", workspaceId: "ready", title: "Request error", status: "AWAITING_APPROVAL", occurrenceCount: 5, requestCount: 5,
+    groupedLogs: [{ logEvidenceJson: { msg: "raw-error-evidence", status: "502" } }],
+    investigation: { summary: "investigation-summary", rootCause: "root-cause", proposedFix: "fix-proposal", confidence: "low", codeContext: ["handler.ts:12"], evidence: { relatedLogs: [{ msg: "request-context" }], summary: { totalLogs: 66, totalRequests: 48 }, selection: { omittedLogs: 2 } } } };
+  const ui = await openPage([workspace("ready")], [], [task]);
+  ui.taskCards[0].click();
+  await setImmediate();
+  assert.equal(ui.elements.get("task-detail-id").textContent, `任务 ID：${task.id}`);
+  assert.match(ui.elements.get("task-detail-logs").textContent, /raw-error-evidence/);
+  assert.match(ui.elements.get("task-context-logs").textContent, /request-context/);
+  assert.match(ui.elements.get("task-context-logs").textContent, /totalLogs[\s\S]*66[\s\S]*omittedLogs[\s\S]*2/);
+  assert.match(ui.elements.get("task-detail-content").textContent, /investigation-summary[\s\S]*root-cause[\s\S]*fix-proposal/);
+  assert.doesNotMatch(ui.elements.get("task-detail-content").textContent, /raw-error-evidence|request-context/);
+  assert.match(ui.elements.get("task-detail-meta").textContent, /待审批 · 错误日志 5 条 · 请求 5 次/);
+});
+
+
+test("automation switch reflects persisted pause, controls its workspace and refreshes without resuming", async () => {
+  const paused = { ...workspace("paused"), automationEnabled: false };
+  const ui = await openPage([paused]);
+  assert.equal(ui.elements.get("automation-toggle")["aria-checked"], "false");
+  assert.match(ui.elements.get("automation-label").textContent, /已暂停/);
+  await ui.tick();
+  assert.equal(ui.elements.get("automation-toggle")["aria-checked"], "false");
+  ui.elements.get("automation-toggle").click();
+  await setImmediate();
+  assert.equal(ui.elements.get("automation-toggle")["aria-checked"], "true");
+  ui.elements.get("automation-toggle").click();
+  await setImmediate();
+  assert.equal(ui.elements.get("automation-toggle")["aria-checked"], "false");
+  assert.match(ui.elements.get("automation-label").textContent, /已暂停/);
 });

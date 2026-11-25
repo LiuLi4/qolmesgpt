@@ -3,6 +3,7 @@ import { realpath } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { AliyunSlsAdapter } from "../integrations/sls/adapter.js";
+import { packInvestigationEvidence, prioritizeEvidence, requestKey, evidenceFields, completionLog } from "./evidence.js";
 import { logFields } from "../detection/aggregation.js";
 import { evidence, type PrismaSlsDetectionStore } from "../detection/prisma.js";
 import type { InvestigationJob } from "./prisma.js";
@@ -15,13 +16,16 @@ export async function prepareInvestigation(job: InvestigationJob, sources: Prism
   const started = Date.now();
   const relatedLogs: unknown[] = [...job.relatedLogs];
   const diagnostics: string[] = [];
-  const requests = [...new Map(job.relatedLogs.map((entry) => {
-    const event = object(entry);
-    return [String(event.correlationKey ?? ""), event] as const;
-  }).filter(([key]) => key)).values()].slice(0, 3);
+  const requestIds = new Set<string>();
+  const requests = prioritizeEvidence(job.relatedLogs).filter((entry) => {
+    const key = requestKey(entry);
+    if (!key || requestIds.has(key)) return false;
+    requestIds.add(key); return true;
+  }).slice(0, 6).map(object);
   const enabled = (await sources.listEnabled()).filter((source) => job.workspaceId ? source.workspaceId === job.workspaceId : source.projectId === job.projectId && !source.workspaceId).slice(0, 10);
   requestLoop: for (const event of requests) {
-    const id = String(event.traceId ?? event.requestId ?? "");
+    const fields = evidenceFields(event);
+    const id = String(event.traceId || fields.traceId || fields.trace_id || event.requestId || fields.requestId || fields.request_id || "");
     const time = new Date(String(event.timestamp)).getTime();
     if (!/^[A-Za-z0-9_.:/-]{1,200}$/.test(id) || !Number.isFinite(time)) continue;
     for (const source of enabled) {
@@ -31,14 +35,20 @@ export async function prepareInvestigation(job: InvestigationJob, sources: Prism
       for (const record of result.records) {
         const fields = logFields(record);
         if (![fields.traceId, fields.trace_id, fields.requestId, fields.request_id].includes(id)) continue;
-        relatedLogs.push({ sourceId: source.id, timestamp: Number.isFinite(Number(record.__time__)) ? new Date(Number(record.__time__) * 1000).toISOString() : String(event.timestamp), log: evidence(record, [source.accessKeyId, source.accessKeySecret, source.securityToken ?? ""]) });
+        relatedLogs.push({ sourceId: source.id, traceId: fields.traceId ?? fields.trace_id, requestId: fields.requestId ?? fields.request_id, timestamp: Number.isFinite(Number(record.__time__)) ? new Date(Number(record.__time__) * 1000).toISOString() : String(event.timestamp), log: evidence(record, [source.accessKeyId, source.accessKeySecret, source.securityToken ?? ""]) });
       }
     }
   }
   const fields = logFields(object(job.errorEvidence));
   const terms = new Set<string>();
   // Prefer stack file locations and exception/service/component names over generic request completion text.
-  const text = JSON.stringify(relatedLogs).slice(0, 60_000);
+  const text = JSON.stringify(packInvestigationEvidence(relatedLogs).records);
+  for (const entry of prioritizeEvidence(relatedLogs).filter((value) => !completionLog(value)).slice(0, 30)) {
+    const f = evidenceFields(entry);
+    for (const value of [f.errorCode, object(f.err).code, object(f.error).code, f.route, f.routeTemplate]) if (typeof value === "string" && /^[A-Za-z0-9_./:-]{3,100}$/.test(value)) terms.add(value);
+    const message = String(f.msg ?? f.message ?? "");
+    if (message.length >= 4 && message.length <= 100 && !/[\r\n]/.test(message)) terms.add(message);
+  }
   for (const match of text.matchAll(/[A-Za-z0-9_./-]+\.(?:ts|js|py|go|java)(?=[:"\\])/g)) terms.add(match[0].split("/").at(-1)!);
   for (const match of text.matchAll(/\b(?:[A-Z][A-Za-z]+(?:Error|Exception)|E[A-Z_]{4,30})\b/g)) terms.add(match[0]);
   for (const value of [fields.component, fields.service, object(fields.err).type, object(fields.error).name]) if (typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.-]{3,79}$/.test(value)) terms.add(value);
@@ -62,6 +72,8 @@ export async function prepareInvestigation(job: InvestigationJob, sources: Prism
       if (codeEvidence.join("").length > 35_000) break;
     } catch { diagnostics.push(`${repo.projectPath}: code checkout unavailable or search failed`); }
   }
+  // Both loops are bounded: at most 6 requests * 10 sources * 100 records plus 200 stored events.
+  // Leave the final budget decision to the shared packer so no intermediate slice silently drops evidence.
   relatedLogs.unshift({ contextDiagnostics: diagnostics, sampledRequests: requests.length, note: "Context is bounded; empty results do not prove absence of errors." });
-  return { ...job, relatedLogs: relatedLogs.slice(0, 350) as InvestigationJob["relatedLogs"], codeEvidence };
+  return { ...job, relatedLogs: relatedLogs as InvestigationJob["relatedLogs"], codeEvidence };
 }

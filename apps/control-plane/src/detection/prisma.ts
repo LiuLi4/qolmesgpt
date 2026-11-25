@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
 import { decryptSecret, redact, type KeyProvider } from "@qolmesgpt/security";
 import { parseEncryptedSecret } from "../integrations/gitlab/types.js";
 import { classifySlsError } from "../integrations/sls/classifier.js";
-import { aggregationIdentity, FINGERPRINT_WINDOW_MS, REQUEST_WINDOW_MS, AGGREGATION_DELAY_MS } from "./aggregation.js";
+import { aggregationIdentity, REQUEST_WINDOW_MS, AGGREGATION_DELAY_MS } from "./aggregation.js";
 
 export interface DetectionLog {
   readonly sourcePositionKey: string;
@@ -89,11 +89,12 @@ async function findGroup(tx: Prisma.TransactionClient, scope: Scope, identity: {
   };
   for (const mode of ["request", "fingerprint"] as const) {
     if (mode === "request" && !identity.correlationKey) continue;
-    const window = mode === "request" ? REQUEST_WINDOW_MS : FINGERPRINT_WINDOW_MS;
     const group = await tx.investigationTask.findFirst({ where: {
       ...base,
-      firstSeenAt: { gte: new Date(timestamp.getTime() - window) },
-      lastSeenAt: { lte: new Date(timestamp.getTime() + window) },
+      ...(mode === "request" ? {
+        firstSeenAt: { gte: new Date(timestamp.getTime() - REQUEST_WINDOW_MS) },
+        lastSeenAt: { lte: new Date(timestamp.getTime() + REQUEST_WINDOW_MS) },
+      } : {}),
       events: { some: mode === "request" ? { correlationKey: identity.correlationKey } : { fingerprint: identity.fingerprint } },
     }, orderBy: { createdAt: "asc" }, select: { id: true, status: true, createdAt: true } });
     if (group) {
@@ -131,7 +132,7 @@ export class PrismaSlsDetectionStore {
     const claimed = await this.prisma.sLSConsumerState.updateMany({
       where: {
         connectionId,
-        connection: { status: "ENABLED" },
+        connection: { status: "ENABLED", OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] },
         OR: [{ workerId, leaseExpiresAt: { gt: now } }, { workerId: null }, { leaseExpiresAt: { lt: now } }],
       },
       data: { consumerGroup, workerId, status: "STARTING", leaseExpiresAt: new Date(now.getTime() + 30_000) },
@@ -142,7 +143,7 @@ export class PrismaSlsDetectionStore {
   async renew(connectionId: string, workerId: string): Promise<boolean> {
     const now = new Date();
     const renewed = await this.prisma.sLSConsumerState.updateMany({
-      where: { connectionId, workerId, leaseExpiresAt: { gt: now }, connection: { status: "ENABLED" } },
+      where: { connectionId, workerId, leaseExpiresAt: { gt: now }, connection: { status: "ENABLED", OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] } },
       data: { leaseExpiresAt: new Date(now.getTime() + 30_000) },
     });
     return renewed.count === 1;
@@ -150,7 +151,7 @@ export class PrismaSlsDetectionStore {
 
   async listEnabled(connectionId?: string): Promise<EnabledSlsSource[]> {
     const connections = await this.prisma.dataSourceConnection.findMany({
-      where: { status: "ENABLED", type: "ALIYUN_SLS", ...(connectionId ? { id: connectionId } : {}) },
+      where: { status: "ENABLED", type: "ALIYUN_SLS", OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }], ...(connectionId ? { id: connectionId } : {}) },
       select: { id: true, projectId: true, workspaceId: true, configJson: true, credentialsCiphertext: true, updatedAt: true, enabledAt: true },
     });
     const enabled: EnabledSlsSource[] = [];
@@ -222,15 +223,19 @@ export class PrismaSlsDetectionStore {
     return created;
   }
 
-  /** Reconcile pre-aggregation pending tasks without deleting evidence or changing approved work. */
-  async reconcilePending(): Promise<number> {
-    const tasks = await this.prisma.investigationTask.findMany({ where: { status: "INVESTIGATION_PENDING", mergedIntoTaskId: null, approvals: { none: {} } }, orderBy: { firstSeenAt: "asc" }, take: 10_000, select: { id: true, projectId: true, workspaceId: true } });
+  /** Reconcile duplicates without deleting evidence; historical completed investigations require explicit opt-in. */
+  async reconcilePending(includeAwaitingApproval = false): Promise<number> {
+    const statuses = includeAwaitingApproval ? ["INVESTIGATION_PENDING", "AWAITING_APPROVAL"] as const : ["INVESTIGATION_PENDING"] as const;
+    const tasks = await this.prisma.investigationTask.findMany({ where: { status: { in: [...statuses] }, mergedIntoTaskId: null, approvals: { none: {} }, repairRuns: { none: {} } }, orderBy: { createdAt: "asc" }, take: 10_000, select: { id: true, projectId: true, workspaceId: true } });
     let merged = 0;
     for (const task of tasks) {
       merged += await this.prisma.$transaction(async (tx) => {
         await lockScope(tx, task);
-        const current = await tx.investigationTask.findUniqueOrThrow({ where: { id: task.id }, include: { events: true, approvals: true } });
-        if (current.status !== "INVESTIGATION_PENDING" || current.mergedIntoTaskId || current.approvals.length) return 0;
+        const current = await tx.investigationTask.findUniqueOrThrow({ where: { id: task.id }, include: { events: true, approvals: true, repairRuns: true } });
+        if (!statuses.some((status) => status === current.status) || current.mergedIntoTaskId || current.approvals.length || current.repairRuns.length) return 0;
+        await tx.$queryRaw`SELECT id FROM "InvestigationTask" WHERE id = ${current.id}::uuid FOR UPDATE`;
+        const eligible = await tx.investigationTask.findFirst({ where: { id: current.id, status: { in: [...statuses] }, mergedIntoTaskId: null, approvals: { none: {} }, repairRuns: { none: {} } } });
+        if (!eligible) return 0;
         for (const event of current.events) {
           const identity = aggregationIdentity(object(event.logEvidenceJson));
           await tx.errorEvent.update({ where: { id: event.id }, data: identity });
@@ -254,7 +259,7 @@ export class PrismaSlsDetectionStore {
     const summary = object(current?.checkpointSummary);
     const recentLogs = logs.slice(-5).map(({ record }) => evidence(record, [source.accessKeyId, source.accessKeySecret, source.securityToken ?? ""]));
     const result = await this.prisma.sLSConsumerState.updateMany({
-      where: { connectionId: source.id, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED" } },
+      where: { connectionId: source.id, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED", OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] } },
       data: { checkpointSummary: {
         ...summary as Prisma.InputJsonObject,
         logsConsumed: Number(summary.logsConsumed ?? 0) + logs.length,
@@ -270,7 +275,7 @@ export class PrismaSlsDetectionStore {
     const previous = object((await this.prisma.sLSConsumerState.findUnique({ where: { connectionId } }))?.checkpointSummary);
     const metrics = Object.fromEntries(["logsConsumed", "tasksCreated", "lastLogAt", "recentLogs"].filter((key) => key in previous).map((key) => [key, previous[key]])) as Prisma.InputJsonObject;
     const result = await this.prisma.sLSConsumerState.updateMany({
-      where: { connectionId, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED" } },
+      where: { connectionId, workerId, leaseExpiresAt: { gt: new Date() }, connection: { status: "ENABLED", OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] } },
       data: { consumerGroup, status, shardAssignments: [...assignments], checkpointSummary: { ...metrics, ...summary }, ...(status === "RUNNING" ? { lastHeartbeatAt: new Date() } : {}) },
     });
     if (result.count !== 1) throw new Error("SLS worker lost its connection lease");

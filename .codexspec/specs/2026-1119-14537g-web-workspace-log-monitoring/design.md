@@ -7,7 +7,7 @@
 
 ## Context
 
-本设计承接已确认的产品规格：用户通过 Web UI 连接 GitLab、选择项目、配置 SLS、接收实时日志、创建逐条错误调查任务，并在合格 Group 成员审批后执行修复、双重验证和创建 MR。
+本设计承接已确认的产品规格：用户通过 Web UI 连接 GitLab、选择 Group Workspace、配置多个 SLS 数据源、接收实时日志、按请求和错误指纹归并调查任务，并在合格 Group 成员审批后执行修复、双重验证和创建 MR。
 
 当前仓库是 Python HolmesGPT 服务，具备 FastAPI `/api/chat` 调查入口和进程级配置的只读阿里云 SLS toolset。仓库没有产品级 TypeScript 后端或正式 Web UI；`experimental/ag-ui` 是演示项目，README 明确声明不适用于生产。因此新产品由 TypeScript 控制面承载，Python HolmesGPT 保持为内部调查执行引擎。SLS 和 GitLab 的用户/项目级配置归 TypeScript 控制面管理，不写入 HolmesGPT 全局 YAML。
 
@@ -47,7 +47,7 @@
 
 ### Detection Pipeline and Task Service
 
-- **Responsibility**: 使用已确认的 SLS 默认错误规则分类日志；将每条匹配日志作为独立 ErrorEvent 写入 PostgreSQL，并关联按请求或指纹归并的 InvestigationTask；更新任务基础状态并提交调查队列。相同日志因重试再次投递时，通过来源位置唯一键实现幂等；不同请求按规范化 fingerprint 在 15 分钟跨度内归并，审批后的任务隔离。
+- **Responsibility**: 使用已确认的 SLS 默认错误规则分类日志；将每条匹配日志作为独立 ErrorEvent 写入 PostgreSQL，并关联按请求或指纹归并的 InvestigationTask；更新任务基础状态并提交调查队列。相同日志因重试再次投递时，通过来源位置唯一键实现幂等；不同请求按规范化 fingerprint 在任务未结束期间持续归并，审批后的任务隔离。
 - **Interface**: 接收 `(DataSourceConnection, SourcePosition, LogRecord)`；事务写入 ErrorEvent 和 InvestigationTask 后返回持久化确认。没有匹配错误规则的记录不创建调查任务，但仍允许 consumer 正常确认其位置。
 - **Covers**: REQ-017, REQ-018, REQ-033, REQ-034, NFR-003, NFR-007
 
@@ -88,7 +88,7 @@
 ### Decision 2: One transactional control database with an outbox
 
 - **Context**: SLS consumer 需要保存事件后推进 checkpoint；调查和修复是异步流程；用户要求先设计数据库。
-- **Decision**: PostgreSQL 是所有业务状态的权威存储。将日志事件、独立调查任务和 outbox 消息在同一事务内提交，再由 worker claim outbox 并执行调查。任务和事件对来源位置建立唯一约束以支持至少一次投递。
+- **Decision**: PostgreSQL 是所有业务状态的权威存储。将日志事件、归并调查任务和 outbox 消息在同一事务内提交，再由 worker claim outbox 并执行调查。任务和事件对来源位置建立唯一约束以支持至少一次投递。
 - **Alternatives**: 先发布到外部消息队列再写数据库；仅使用进程内任务队列。
 - **Trade-offs**: PostgreSQL 承担异步任务队列的一部分负载，吞吐规模有限；换来原子性、可恢复性和较少的第一期基础设施。若吞吐或消费积压超过数据库 worker 能力，可把 outbox relay 接到独立消息服务而保留 outbox 事务边界。
 - **Covers**: REQ-018, REQ-032 至 REQ-034, NFR-005 至 NFR-007
@@ -335,3 +335,9 @@ Consumer callbacks
 - GET GitLab Group 项目支持 includeSubgroups 和分页；POST /api/workspaces 根据用户授权发现全部仓库并初始化/重试 checkout，GET /api/state 返回 Workspace 和逐仓状态。
 - SLS 创建/测试改为接收 workspaceId，验证当前用户对 Workspace 的所有权。后台消费者仍针对每个数据源只消费一次；不会为每个仓库重复消费相同日志。
 - Group Workspace 调查附带仓库清单/只读代码证据；审批绑定调查目标仓库，各仓库执行前重新验证 GitLab 权限和锁。
+
+## Workspace 自动化暂停
+
+`GroupWorkspace.automationEnabled` 持久化自动消费与调查开关。`POST /api/workspaces/:id/automation` 校验当前用户归属后更新开关；暂停在事务中撤销 SLS 租约和调查 claim，保留 checkpoint、证据与结果，将未审批的调查中任务退回待调查。worker 在领取、续租、读取和模型请求前后检查开关，进行中的模型 HTTP 请求通过 AbortSignal 中断。暂停不会重置来源启用时间或消费组。
+
+调查详情头部显示完整任务 ID，桌面以左右两栏展示日志证据和调查结论，窄屏按顺序堆叠。

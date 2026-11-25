@@ -114,7 +114,10 @@ export async function runSlsSource(
           const cursor = cursors.get(shard);
           if (!cursor) throw new Error("Assigned shard has no cursor");
           const fenced = {
-            pullLogs: protocol.pullLogs.bind(protocol),
+            pullLogs: async (ownedShard: number, ownedCursor: string, count: number) => {
+              if (!(await store.renew(source.id, workerId))) throw new Error("SLS worker lost its connection lease");
+              return protocol.pullLogs(ownedShard, ownedCursor, count);
+            },
             updateCheckpoint: async (ownedShard: number, nextCursor: string) => {
               if (!(await store.renew(source.id, workerId))) throw new Error("SLS worker lost its connection lease");
               await protocol.updateCheckpoint(ownedShard, nextCursor);

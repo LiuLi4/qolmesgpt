@@ -1,3 +1,4 @@
+import { WorkspaceAutomationService } from "@qolmesgpt/control-plane";
 import { PrismaInvestigationStore } from "@qolmesgpt/control-plane";
 import { backfillSls, AliyunSlsConsumerProtocol } from "@qolmesgpt/workers";
 import { GitRepositoryCheckout } from "@qolmesgpt/control-plane";
@@ -129,6 +130,7 @@ async function statePayload(workspaceId?: string) {
     workspaces: groupWorkspaces.map((workspace) => ({
       id: workspace.id,
       group: workspace.group.fullPath,
+      automationEnabled: workspace.automationEnabled,
       status: workspace.status,
       relativePath: workspace.relativePath,
       errorMessage: workspace.errorMessage,
@@ -219,6 +221,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   try {
     if (req.method === "GET" && url.pathname === "/api/state") {
       sendJson(res, 200, await statePayload(url.searchParams.get("workspaceId") || undefined));
+      return;
+    }
+    const automationPath = req.method === "POST" && url.pathname.match(/^\/api\/workspaces\/([^/]+)\/automation$/);
+    if (automationPath) {
+      const runtime = await getWebRuntime();
+      const body = await readBody(req);
+      if (typeof body.enabled !== "boolean") { sendJson(res, 400, { message: "enabled must be a boolean" }); return; }
+      const result = await new WorkspaceAutomationService(runtime.prisma).set(runtime.userId, decodeURIComponent(automationPath[1]!), body.enabled);
+      sendJson(res, 200, { ok: true, ...result, message: result.automationEnabled ? "AI 自动读取日志与调查已启用，将从原消费位置继续。" : "已暂停当前 Workspace 的自动日志读取与 AI 调查。" });
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/sls/backfill") {
