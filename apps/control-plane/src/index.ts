@@ -5,7 +5,7 @@ export function controlPlaneStatus(): { adapter: string } {
 export { PrismaSlsDetectionStore } from "./detection/prisma.js";
 export type { EnabledSlsSource, DetectionLog } from "./detection/prisma.js";
 export { classifySlsError } from "./integrations/sls/classifier.js";
-export { aggregationIdentity, normalizeErrorMessage, logFields, FINGERPRINT_WINDOW_MS, REQUEST_WINDOW_MS } from "./detection/aggregation.js";
+export { aggregationIdentity, normalizeErrorMessage, logFields, REQUEST_WINDOW_MS } from "./detection/aggregation.js";
 export { createSlsDetectionRuntime } from "./detection/runtime.js";
 export { PrismaInvestigationStore } from "./investigation/prisma.js";
 export type { InvestigationJob, InvestigationResult } from "./investigation/prisma.js";
@@ -27,3 +27,5 @@ export { gitBeakerApiFactory } from "./integrations/gitlab/gitbeaker.js";
 export { DataSourceRoutes } from "./routes/data-sources.js";
 
 export { GitRepositoryCheckout, GroupWorkspaceService } from "./workspace/group.js";
+
+export { WorkspaceAutomationService } from "./workspace/automation.js";

@@ -6,7 +6,7 @@
 
 - `(dataSourceConnectionId, sourcePositionKey)` 唯一，消费重放不会增加证据或任务。
 - 同一 Workspace 的多个数据源共同参与归并；优先 traceId，其次 service + requestId，最大请求跨度 60 分钟。
-- 不同请求使用规范化错误指纹（服务、组件、异常类型、状态、方法、路由、错误消息），在跨度 15 分钟内归并。动态数字、UUID、长十六进制标识被替换。
+- 不同请求使用规范化错误指纹（服务、组件、异常类型、状态、方法、路由、错误消息）归并；只要任务仍未审批、修复或关闭，同类指纹持续归入同一任务，不再受时间窗限制。动态数字、UUID、长十六进制标识被替换。
 - 卡片显示错误日志条数、请求数、首次和最近时间。缺少关联 ID 的日志各计一次请求，无法断言属于同一次请求。
 - 已审批、修复中、失败或关闭的任务不接收新证据。调查期间证据版本变化会重新排队，防止旧结果进入审批。
 - 初始等待 10 秒收集证据，最多延后到任务建立后 60 秒。日志保留，不删除原始事件。没有请求 ID 时不能凭时间邻近推断请求归属。
@@ -49,4 +49,10 @@ Web、SLS 消费 Worker、调查 Worker 和 Holmes 服务需要分别长期运�
 - `pnpm lint && pnpm typecheck && pnpm test`；数据库测试使用 DATABASE_URL 创建并清理独立 schema。
 - 页面选择 Workspace，卡片显示归并计数，详情显示根因、建议、引用和请求上下文；每 5 秒刷新。
 - 401 通常是 Holmes 服务认证或模型凭据无效，503 是服务不可达。修正凭据并重启 Holmes 服务后，点击详情中的“重新调查”。
-- 老版本未归并的待调查任务可通过 `PrismaSlsDetectionStore.reconcilePending()` 一次性合并。保留历史卡片 ID 和全部证据，旧卡片标记 CLOSED + mergedIntoTaskId，主列表隐藏。只处理未审批且待调查的最多 10,000 个任务；大批历史数据应分批运行。
+- 老版本未归并的待调查任务可通过 `PrismaSlsDetectionStore.reconcilePending(true)` 一次性合并。保留历史卡片 ID 和全部证据，旧卡片标记 CLOSED + mergedIntoTaskId，主列表隐藏。参数 true 纳入历史待审批任务，运行中、已审批、修复、失败或已关闭任务不改写；单次最多处理 10,000 个任务；大批历史数据应分批运行。
+
+## Workspace 自动化开关
+
+顶部“AI 自动读取日志”开关控制当前 Workspace 全部数据源的自动读取与 AI 调查。状态持久化在 `GroupWorkspace.automationEnabled`，通过 `POST /api/workspaces/:id/automation` 更新。暂停撤销 SLS 消费租约和调查 claim，停止新任务领取并中断进行中的模型请求；历史证据、结果、审批、来源启用时间和消费 checkpoint 保留。恢复使用原 Consumer Group 继续消费。
+
+调查详情头部展示完整任务 ID；左栏是错误日志与同请求上下文，右栏是调查结论。暂停期间仍可查看历史数据，页面每 5 秒刷新；不会触发自动 SLS 读取或模型分析。

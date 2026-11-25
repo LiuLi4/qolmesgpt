@@ -79,8 +79,9 @@ test("source worker recovers a checkpoint, processes a batch, and reports health
       assert.equal(from, "end");
       return "end";
     },
-    pullLogs: async (_shard: number, cursor: string) => {
+    pullLogs: async (_shard: number, cursor: string, count: number) => {
       assert.equal(cursor, "saved");
+      assert.equal(count, 1);
       calls.push("pull");
       return { nextCursor: "next", logGroupCount: 1, logs: [{ sourcePositionKey: "p", record: { __time__: 100, level: 50 } }] };
     },
@@ -92,6 +93,32 @@ test("source worker recovers a checkpoint, processes a batch, and reports health
   await runSlsSource(source, store, "worker-1", controller.signal, () => protocol);
   assert.deepEqual(calls, ["group", "pull", "persist", "checkpoint"]);
   assert.deepEqual(states, ["STARTING", "RUNNING", "STOPPED"]);
+});
+
+test("source worker checks its lease immediately before pulling logs", async () => {
+  const controller = new AbortController();
+  let renewals = 0;
+  let pulls = 0;
+  const source = {
+    id: "source-paused", revision: 1, enabledAt: new Date(), projectId: "project-1",
+    endpoint: "https://cn-shanghai.log.aliyuncs.com", project: "telemetry", logstore: "staging",
+    accessKeyId: "id", accessKeySecret: "secret",
+  };
+  const store = {
+    listEnabled: async () => [source], claim: async () => true,
+    renew: async () => ++renewals === 1,
+    release: async () => {}, persist: async () => { assert.fail("paused source must not persist"); },
+    setState: async (_id: string, _group: string, _owner: string, status: string) => { if (status === "DEGRADED") controller.abort(); },
+  };
+  const protocol = {
+    ensureConsumerGroup: async () => {}, heartbeat: async () => [0],
+    getCheckpoints: async () => [{ shard: 0, checkpoint: "saved" }], getCursor: async () => "end",
+    pullLogs: async () => { pulls++; return { nextCursor: "next", logGroupCount: 0, logs: [] }; },
+    updateCheckpoint: async () => { assert.fail("paused source must not acknowledge"); },
+  };
+  await runSlsSource(source, store, "worker-paused", controller.signal, () => protocol);
+  assert.equal(renewals, 2);
+  assert.equal(pulls, 0);
 });
 
 test("source worker retries a failed pull without acknowledging the failed batch", async () => {

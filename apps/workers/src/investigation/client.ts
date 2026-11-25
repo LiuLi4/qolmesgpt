@@ -34,7 +34,7 @@ const resultSchema = {
 } as const;
 
 export interface HolmesClient {
-  investigate(job: InvestigationJob): Promise<InvestigationResult>;
+  investigate(job: InvestigationJob, signal?: AbortSignal): Promise<InvestigationResult>;
 }
 
 function bounded(value: string, max: number): string { return value.length > max ? `${value.slice(0, max)}…` : value; }
@@ -64,7 +64,7 @@ function parseResult(value: unknown): InvestigationResult {
 export class HttpHolmesClient implements HolmesClient {
   constructor(private readonly baseUrl: string, private readonly apiKey?: string, private readonly fetcher: typeof fetch = fetch) {}
 
-  async investigate(job: InvestigationJob): Promise<InvestigationResult> {
+  async investigate(job: InvestigationJob, signal?: AbortSignal): Promise<InvestigationResult> {
     const url = new URL("/api/chat", this.baseUrl);
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.apiKey) headers["x-api-key"] = this.apiKey;
@@ -79,7 +79,7 @@ export class HttpHolmesClient implements HolmesClient {
       `Read-only code evidence: ${bounded(JSON.stringify(job.codeEvidence ?? []), 40_000)}`,
       "Use affectedProjectIds only from this inventory and cite evidence for each. Return an empty list when attribution is uncertain. Never assume the first repository owns the error. Include paths and supporting log lines in codeContext and state missing evidence instead of guessing.",
     ].join("\n");
-    const response = await this.fetcher(url, { signal: AbortSignal.timeout(180_000), method: "POST", headers, body: JSON.stringify({ ask, stream: false, response_format: resultSchema }) });
+    const response = await this.fetcher(url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000), method: "POST", headers, body: JSON.stringify({ ask, stream: false, response_format: resultSchema }) });
     if (!response.ok) throw new Error(`HOLMES_HTTP_${response.status}`);
     const result = parseResult(await response.json());
     return { ...result, evidence: { relatedLogs: JSON.parse(boundedEvidence(job.relatedLogs ?? [], 60_000)), codeEvidence: (job.codeEvidence ?? []).slice(0, 30) } };

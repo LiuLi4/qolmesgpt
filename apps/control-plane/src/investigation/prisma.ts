@@ -32,7 +32,7 @@ export class PrismaInvestigationStore {
       const candidate = await tx.outboxMessage.findFirst({
         where: {
           eventType: "InvestigationRequested",
-          task: { mergedIntoTaskId: null, status: { in: ["INVESTIGATION_PENDING", "INVESTIGATING"] }, approvals: { none: {} } },
+          task: { OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }], mergedIntoTaskId: null, status: { in: ["INVESTIGATION_PENDING", "INVESTIGATING"] }, approvals: { none: {} } },
           availableAt: { lte: now },
           OR: [{ claimedAt: null }, { claimedAt: { lt: new Date(now.getTime() - leaseMs) } }],
         },
@@ -41,6 +41,8 @@ export class PrismaInvestigationStore {
       });
       if (!candidate) return null;
       await tx.$queryRaw`SELECT id FROM "InvestigationTask" WHERE id = ${candidate.aggregateId}::uuid FOR UPDATE`;
+      const enabled = await tx.investigationTask.findFirst({ where: { id: candidate.aggregateId, mergedIntoTaskId: null, status: { in: ["INVESTIGATION_PENDING", "INVESTIGATING"] }, approvals: { none: {} }, OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] }, select: { id: true } });
+      if (!enabled) return null;
       const claimed = await tx.outboxMessage.updateMany({
         where: { id: candidate.id, OR: [{ claimedAt: null }, { claimedAt: { lt: new Date(now.getTime() - leaseMs) } }] },
         data: { claimedAt: now, claimOwner: owner, attempts: { increment: 1 } },
@@ -104,9 +106,23 @@ export class PrismaInvestigationStore {
     });
   }
 
+  async isAutomationEnabled(taskId: string): Promise<boolean> {
+    return Boolean(await this.prisma.investigationTask.findFirst({ where: { id: taskId, mergedIntoTaskId: null, approvals: { none: {} }, OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] }, select: { id: true } }));
+  }
+
+  async defer(outboxId: string, owner: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const message = await tx.outboxMessage.findUnique({ where: { id: outboxId }, select: { aggregateId: true, claimOwner: true } });
+      if (!message || message.claimOwner !== owner) return;
+      await tx.$queryRaw`SELECT id FROM "InvestigationTask" WHERE id = ${message.aggregateId}::uuid FOR UPDATE`;
+      const released = await tx.outboxMessage.updateMany({ where: { id: outboxId, claimOwner: owner }, data: { claimedAt: null, claimOwner: null, attempts: { decrement: 1 } } });
+      if (released.count) await tx.investigationTask.updateMany({ where: { id: message.aggregateId, mergedIntoTaskId: null, approvals: { none: {} }, status: "INVESTIGATING" }, data: { status: "INVESTIGATION_PENDING" } });
+    });
+  }
+
   async retry(taskId: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.investigationTask.updateMany({ where: { id: taskId, mergedIntoTaskId: null, status: { in: ["FAILED", "INVESTIGATION_PENDING", "AWAITING_APPROVAL"] }, approvals: { none: {} }, repairRuns: { none: {} } }, data: { status: "INVESTIGATION_PENDING", investigationResultJson: Prisma.DbNull, analyzedVersion: 0 } });
+      const claimed = await tx.investigationTask.updateMany({ where: { id: taskId, mergedIntoTaskId: null, status: { in: ["FAILED", "INVESTIGATION_PENDING", "AWAITING_APPROVAL"] }, approvals: { none: {} }, repairRuns: { none: {} }, OR: [{ workspaceId: null }, { workspace: { automationEnabled: true } }] }, data: { status: "INVESTIGATION_PENDING", investigationResultJson: Prisma.DbNull, analyzedVersion: 0 } });
       if (claimed.count !== 1) throw new Error("Task cannot be retried while investigating, approved or repairing");
       await tx.outboxMessage.deleteMany({ where: { aggregateId: taskId, eventType: "InvestigationRequested" } });
       await tx.outboxMessage.create({ data: { aggregateType: "InvestigationTask", aggregateId: taskId, eventType: "InvestigationRequested", payload: { taskId } } });

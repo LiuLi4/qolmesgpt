@@ -50,3 +50,30 @@ test("worker completes the claimed evidence version and client refuses empty con
   });
   await assert.rejects(client.investigate(job), /HOLMES_INCOMPLETE_RESULT/);
 });
+
+test("paused investigations defer without calling the model or consuming a retry", async () => {
+  let deferred = 0;
+  const store = { claim: async () => job, isAutomationEnabled: async () => false,
+    defer: async () => { deferred++; }, complete: async () => { assert.fail("paused result must not complete"); }, fail: async () => { assert.fail("pause must not become a failure"); } };
+  await runInvestigationOnce(store, { investigate: async () => { assert.fail("paused job must not call the model"); } }, "worker");
+  assert.equal(deferred, 1);
+});
+
+test("a pause after model execution discards the result and preserves the queued job", async () => {
+  let enabled = true; let deferred = false;
+  const store = { claim: async () => job, isAutomationEnabled: async () => enabled,
+    defer: async () => { deferred = true; }, complete: async () => { assert.fail("paused result must not complete"); }, fail: async () => { assert.fail("pause must not become a failure"); } };
+  await runInvestigationOnce(store, { investigate: async () => { enabled = false; return { summary: "s", rootCause: "r", codeContext: [], proposedFix: "p", confidence: "low" }; } }, "worker");
+  assert.equal(deferred, true);
+});
+
+test("Holmes HTTP requests propagate an external cancellation signal", async () => {
+  const controller = new AbortController();
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async (_url, init) => {
+    controller.abort();
+    assert.equal(init?.signal?.aborted, true);
+    init?.signal?.throwIfAborted();
+    throw new Error("unreachable");
+  });
+  await assert.rejects(client.investigate(job, controller.signal), { name: "AbortError" });
+});
