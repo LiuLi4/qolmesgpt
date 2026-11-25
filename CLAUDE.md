@@ -265,6 +265,8 @@ For the complete eval CLI reference (flags, env vars, model comparison, debuggin
 - **When committing, use `git commit -s --no-verify`** to skip local pre-commit hooks (they are not installed consistently and will cause unrelated changes)
 
 **Git Workflow Guidelines**:
+- Use `dev` as the default branch for future development and push completed work to `origin/dev`.
+- Use another development branch or update `master` only when the user explicitly requests it.
 - ALWAYS create commits, NEVER amend
 - ALWAYS merge, NEVER rebase
 - ALWAYS push, NEVER force push
