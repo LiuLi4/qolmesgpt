@@ -1,0 +1,732 @@
+---
+name: codexspec:pr
+description: "根据分支差异生成 GitHub PR 或 GitLab MR 的标题、说明与验证指引。"
+---
+
+## Constitution Compliance (MANDATORY)
+
+**Before generating PR description:**
+
+1. **Check for Constitution File**: Look for `.codexspec/memory/constitution.md`
+2. **If Constitution Exists**:
+   - Load and read relevant principles (especially documentation standards, code review guidelines)
+   - Ensure PR description reflects constitutional principles
+   - Verify that the changes align with project quality standards
+3. **If No Constitution Exists**: Proceed with standard PR generation
+
+## Language Preference
+
+**IMPORTANT**: Before generating PR descriptions, read the project's language configuration from `.codexspec/config.yml`.
+
+**PR description language priority**:
+
+1. If `language.commit` is set, use that language for the PR description
+2. Otherwise, use `language.output` as fallback
+3. If neither is configured, default to English
+
+**Note**:
+
+- Technical terms (e.g., API, JWT, OAuth, PR, MR) may remain in English when appropriate
+- The PR title and section headers should follow the configured language
+
+**Examples**:
+
+- `output: "zh-CN"` + `commit: "en"` → Chinese interactions, English PR descriptions
+- `output: "zh-CN"` + `commit: "zh-CN"` → Chinese for both
+- `output: "zh-CN"` + no `commit` setting → Chinese for both (fallback)
+
+## Expression Standard
+
+**IMPORTANT**: Everything this command produces — documents, reviews, reports, commit messages, diagnostics, and replies — is written for a reader who cannot see your working context. Apply the rules below to every artifact and message you output:
+
+- **Write for the reader at hand-off.** Every reference must resolve without access to this session: no session-only identifiers or section numbers, no narration of what changed during the conversation, no arguments with absent reviewers. State current reality and cite committed, reachable sources.
+- **Preserve every proposition.** Before summarizing or trimming, list the facts a passage carries: actors, conditions, ordering, modalities (must, never), negative guarantees, and consequences. Remove only reasoning transcripts, repetition, and decoration. Shorter is not clearer if any fact is lost.
+- **State what the surface requires.** Diagnostics name what failed, which rule was violated, and the correction. Problem reports carry the defect, its location, its impact, and the evidence. Decisions record the alternatives they beat. Rejections give the reason in one line. Shipped work is described in the present tense; plans and open questions are labeled as such.
+- **Define terms before relying on them.** Prefer the concrete rule, field, or behavior over a coined label; give a project-specific term a plain-language definition at first use, then use it consistently.
+- **Be honest, not agreeable.** Verify claims before accepting them; fix or rebut on technical grounds. One substantiated blocker is worth more than a list of nitpicks. When a decision is needed, present only viable options, recommend one, and state the real difference between them.
+- **Declare what is binding.** Say explicitly which instructions are hard requirements and where judgment is required. Keep one explanation in one place and link to it, but keep at the point of use the contract a reader needs there.
+
+## Workspace Routing Before Writes
+
+This section governs the location of every later file, index, branch, and commit mutation.
+Record `SOURCE_ROOT` as the explicitly selected checkout (otherwise the invoking checkout) before
+changing working directories. Read its `.codexspec/config.yml`: `workflow.worktrees` defaults to
+on; only the literal boolean `false` disables it. Configuration remains checkout-local. Read-only
+inspection keeps its original source target and does not create a worktree merely to read files.
+
+- With `CODEXSPEC_AUTO_DEV_DELEGATION`, use the dedicated worktree supplied by auto-dev as
+  `OUTPUT_ROOT` throughout. `blueprint` and `auto-dev` themselves retain their existing fixed branch
+  `codexspec/auto-dev` and worktree `worktree-for-codexspec-auto-dev`; they always use the new shared
+  `<repository-name>-codexspec-worktrees` parent, irrespective of the ordinary isolation switch.
+- With ordinary isolation disabled, `OUTPUT_ROOT` is `SOURCE_ROOT` and existing in-place behavior
+  applies. `codexspec init`, both first-time setup and installation updates, is explicitly exempt:
+  it operates on its selected checkout regardless of this switch.
+- For a new ordinary feature (`specify`, `quick`, or another feature-creation entry), invoke the
+  installed platform create-new-feature script or `codexspec _worktree-helper create --name
+  <short-name>` before the first artifact write. Parse returned JSON rather than evaluating shell
+  output. `workspace`, `feature_dir`, and `requirements_file` are absolute paths; `branch` is the
+  full `<feature-id>-<feature-name>`. Set `OUTPUT_ROOT` to that workspace.
+- For an existing ordinary feature, resolve its explicit feature path/name first, otherwise its
+  current feature branch, using `codexspec _worktree-helper resolve --feature <full-feature-name>`.
+  Reuse that returned worktree. Do not silently pick another feature or create a replacement
+  from main. If an explicit feature path names another checkout, use that checkout's configuration
+  and preserve the identity of its documents and code.
+- For standalone project-level writes without a selected ordinary feature, use
+  `codexspec _worktree-helper route` from `SOURCE_ROOT`. An active feature workspace is reused;
+  otherwise the helper uses `worktree-for-codexspec-maintenance`. Use the returned absolute
+  workspace as `OUTPUT_ROOT`. Revalidate both source and destination rather than interpreting an
+  arbitrary existing directory as a managed workspace.
+
+When creation is interrupted, retain the returned `branch` and `workspace` even in an error
+response. Resume the same identity with `codexspec _worktree-helper create --feature
+<full-feature-name>`; a `creating` response from resolve requires this recovery step before
+merge verification. A new `--name` request never adopts an existing identity after a random
+name collision; report that collision and retry a new identity only for a genuinely new feature.
+
+A `ready` response is required before writing feature artifacts or continuing development. Exit
+status 3 with `merge_requires_resolution` or `merge_requires_verification` is a preparation handoff,
+not success. Resolve and stage conflicts only in the returned worktree. Leave a pending
+merge uncommitted. Run the project's required checks against the prepared files, then take a
+`codexspec _commit-staged-helper snapshot` in that worktree with its original index (no inherited
+GIT_INDEX_FILE). For a contentful merge, invoke `$codexspec:commit-staged -p` on that exact
+snapshot and retain its complete message. Describe changes as integrated changes; do not attribute
+all incoming code to conflict resolution. If the snapshot contains `default_message`, the merge
+only connects history: keep its message unchanged by supplying `message: null`.
+
+Call `codexspec _worktree-helper finish --feature <full-feature-name> --verification <json-file>`
+(use `worktree-for-codexspec-maintenance` for maintenance preparation). The JSON contains the
+verified `head`, staged `tree`, `checks` entries with `command` and integer `exit_code`, and,
+for a pending merge, the complete `analysis` snapshot and `message`. The finish helper rechecks
+and commits the same index. Never commit the pending merge directly or bypass a rejected snapshot.
+If recovery finds the commit already created, verify its current HEAD/tree and submit head/tree/checks
+without a new message. Never claim checks ran when they did not. If conflicts or checks cannot
+be resolved, stop and retain the same identity; do not create a second feature to bypass preparation.
+Fetch warnings indicate potentially stale remote information, not permission to bypass checks.
+
+Initial fixed auto-dev/blueprint workspace creation follows the same pending handoff. If acquisition
+or blueprint setup exits 3 with `merge_requires_resolution` or `merge_requires_verification`, use
+its returned `workspace`, resolve/stage/check/analyze as above, and call
+`codexspec _worktree-helper finish-initial --verification <json-file>`. Retry the original setup
+only after `ready`. The helper excludes active auto-dev owners and retains interrupted preparation.
+
+Every mutating tool call and later SDD invocation must explicitly use `OUTPUT_ROOT` or paths inside
+it. Before each file write, verify real filesystem containment: refuse symbolic links in the
+output path and existing destination files with multiple hard links. A lexical path beneath
+`OUTPUT_ROOT` alone does not establish isolation; never write through a link into another checkout.
+A `cd` in one shell subprocess does not change the agent's later tool working directories.
+Carry the same absolute workspace across stage handoffs. If required installation assets are
+absent in a new worktree, run normal installation explicitly against that destination, preserving
+existing project-authored files; stop if the required runtime or setup is unavailable.
+
+Preserve input provenance: artifact-only reviews/reverse specification can read `SOURCE_ROOT`
+while writing reports to `OUTPUT_ROOT`; their artifact containment checks apply to `OUTPUT_ROOT`.
+Source edits and executable checks use the selected feature workspace. `commit-staged` preview
+reads the original index; execution must stop if routing would substitute a different index or
+mutate the protected main checkout. Do not copy, stash, stage, reset, or discard caller-owned changes
+to make routing appear successful. Report an incompatible input/workspace and the required target
+instead. Existing command-specific prohibitions still apply.
+
+For configuration edits, decide routing from `SOURCE_ROOT`'s setting, then read and modify the
+configuration in `OUTPUT_ROOT`. A bare toggle uses the destination's value. Report the exact path
+and explain that other checkouts receive the setting through Git integration; do not add a shared
+override or imply immediate changes to main's effective value. Completion retains worktrees; it
+does not automatically merge to main or delete them. Any occupied path, invalid identity, failed
+creation, or unusable baseline is an explicit stop, never permission to fall back to main writes.
+
+## User Input
+
+```
+the text after the $codexspec:pr skill mention
+```
+
+## Parameters
+
+Parse `the text after the $codexspec:pr skill mention` for the following optional parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--target-branch <branch>` | `origin/main` | Branch to compare against |
+| `--output <file>` | (none) | Save output to file instead of terminal |
+| `--sections <list>` | `all` | Comma-separated sections to include |
+| `--spec <path>` | (none) | Enable spec.md integration (opt-in) |
+
+### `--sections` Values
+
+- `summary` - High-level overview of changes
+- `changes` - Detailed file changes and technical approach
+- `testing` - Test coverage information
+- `verify` - Verification steps
+- `checklist` - Pre-merge checklist
+- `notes` - Additional notes and breaking changes
+- `all` - Include all sections (default)
+
+Example: `--sections summary,changes,testing`
+
+### `--spec` Usage (Opt-in)
+
+By default, spec.md is **NOT** used. Use `--spec` to enable SDD workflow integration:
+
+| Value | Behavior |
+|-------|----------|
+| (not specified) | No spec integration, generate from git only |
+| `2025-0321-1430k7-auth` | Use `.codexspec/specs/2025-0321-1430k7-auth/spec.md` |
+| `path/to/spec.md` | Use specified spec.md file path |
+
+**When to use**:
+
+- Following SDD workflow with existing spec.md
+- Want Context section with user stories and requirements
+- Large feature changes with documented specifications
+
+**When NOT to use**:
+
+- Small bug fixes or minor changes
+- Quick iterations without formal specification
+- Changes unrelated to existing specs
+
+## Git Context Collection
+
+Execute the following commands to gather git context:
+
+1. **Current Branch**: `git branch --show-current`
+2. **Current Branch (full ref)**: `git rev-parse --abbrev-ref HEAD`
+3. **Remote URL**: `git remote get-url origin` (or error if no remote)
+4. **Commits Ahead**: `git log --oneline --no-merges <target-branch>..HEAD`
+5. **File Changes**: `git diff --name-status <target-branch>...HEAD`
+6. **Full Diff**: `git diff <target-branch>...HEAD`
+7. **Commit Messages**: `git log --pretty=format:"%s" --no-merges <target-branch>..HEAD`
+
+## Platform Detection
+
+Detect the Git platform from the remote URL:
+
+### Detection Rules
+
+1. **GitHub**: URL contains `github.com`
+   - Use "Pull Request" terminology
+   - Title format: `## Pull Request: [Title]`
+
+2. **GitLab**: URL contains `gitlab.com`
+   - Use "Merge Request" terminology
+   - Title format: `## Merge Request: [Title]`
+
+3. **Other/No Remote**: Default to GitHub terminology
+   - Display warning if no remote configured
+
+## Spec.md Integration (Opt-in)
+
+Only when `--spec` is provided, read spec.md for Context section.
+
+### Spec Resolution
+
+1. If `--spec` is a partial prefix like `2025-0321`, resolve to `.codexspec/specs/2025-0321*/spec.md`
+2. If `--spec` is a full directory name like `2025-0321-1430k7-auth`, resolve to `.codexspec/specs/2025-0321-1430k7-auth/spec.md`
+3. If `--spec` is a path, use directly
+
+### Content Extraction (Best-Effort)
+
+Extract content from spec.md with priority order:
+
+1. **User Stories** - Primary source for Context
+2. **Goals** - Fallback if no User Stories
+3. **Overview** - Fallback if no Goals
+4. **Requirements** - Last resort
+
+**Graceful Degradation**:
+
+- If spec structure is incomplete, use available sections
+- Do not error or warn on incomplete specs
+- Skip Context section if no spec or extraction fails
+
+### Invalid Spec Path Handling
+
+If `--spec` path doesn't exist:
+
+1. List available specs: `ls .codexspec/specs/`
+2. Display error: "Spec '[path]' not found. Available specs: [list]"
+3. Continue without Context section
+
+## PR Title Generation
+
+Generate the PR title following **Conventional Commits** specification:
+
+- Format: `type(scope): description`
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
+- If the project has a `CLAUDE.md` with custom commit conventions, follow those instead
+
+### Generation Process
+
+1. **Primary Source**: Analyze git diff content
+   - Identify main components/modules changed
+   - Understand the nature of changes (feature, fix, refactor, etc.)
+   - Determine the appropriate **type** prefix
+
+2. **Supporting Sources**:
+   - Branch name (extract feature/fix hints)
+   - Commit messages (understand intent, look for existing type prefixes)
+
+3. **Synthesis**:
+   - Combine insights into a single descriptive title
+   - Keep it concise but informative
+   - Use imperative mood (e.g., "Add" not "Added")
+
+### Type Determination Rules
+
+| Type | When to Use |
+|------|-------------|
+| `feat` | New feature or functionality |
+| `fix` | Bug fix |
+| `docs` | Documentation changes only |
+| `style` | Code style changes (formatting, semicolons, etc.) |
+| `refactor` | Code refactoring without changing behavior |
+| `perf` | Performance improvements |
+| `test` | Adding or modifying tests |
+| `build` | Build system or dependency changes |
+| `ci` | CI/CD configuration changes |
+| `chore` | Other changes that don't modify src or test files |
+| `revert` | Reverting a previous commit |
+
+### Scope (Optional)
+
+Add scope when changes are focused on a specific module/component:
+
+- `feat(auth): add OAuth2 support`
+- `fix(api): handle timeout errors`
+- `refactor(core): improve caching mechanism`
+
+**Example**:
+
+- Branch: `feature/auth-cleanup`
+- First commit: "Add password validation"
+- Actual changes: Full authentication refactor
+- **Generated title**: `refactor(auth): improve authentication system with JWT and session management`
+
+## Test File Discovery
+
+Identify test files using language-agnostic patterns:
+
+### Directory Patterns
+
+- `tests/`
+- `test/`
+- `__tests__/`
+- `spec/`
+
+### File Name Patterns
+
+- `*_test.py`, `test_*.py`
+- `*.test.js`, `*.spec.ts`
+- `*_test.go`
+- `*Test.java`, `*Tests.java`
+
+### Combined Approach
+
+Match files that are:
+
+- In test directories, OR
+- Match file name patterns
+
+## Project Command Detection
+
+Detect project-specific test commands for "How to Verify" section:
+
+| Detection | Command | Example |
+|-----------|---------|---------|
+| `pyproject.toml` + (`pytest.ini` OR `tests/`) | `pytest` | `uv run pytest` or `pytest` |
+| `package.json` + `jest.config.js` | `npm test` | `npm test` |
+| `package.json` + `vitest.config.ts` | `npm run test` | `npm run test` |
+| `Cargo.toml` | `cargo test` | `cargo test` |
+| `go.mod` | `go test` | `go test ./...` |
+| `Makefile` with `test` target | `make test` | `make test` |
+
+**Fallback**: If no project files detected, use generic steps:
+
+1. Install dependencies
+2. Run tests
+
+## Section Generation
+
+Generate PR sections based on gathered information:
+
+### Summary Section
+
+**Format:** `### Summary`
+**Source:** Git diff analysis + commit messages
+**Content:**
+
+- High-level overview of changes and motivation
+- 2-3 sentences maximum, answer "What" and "Why"
+
+### Changes Section
+
+**Format:** `### Changes`
+**Source:** Git diff analysis
+**Content:**
+
+- Table of files changed with change type and description
+- Technical details subsection with implementation approach
+- Architectural decisions if apparent
+
+### Testing Section
+
+**Format:** `### Testing`
+**Source:** Test file discovery + commit messages
+**Content:**
+
+- Task list for test coverage status
+- Test files discovered
+- Exact commands to run tests
+
+### How to Verify Section
+
+**Format:** `### How to Verify`
+**Source:** Project command detection
+**Content:**
+
+- Numbered list of step-by-step verification instructions
+- Project-specific test commands
+- Manual verification steps if applicable
+
+### Checklist Section
+
+**Format:** `### Checklist`
+**Source:** Standard checklist items
+**Content:**
+
+- GitHub/GitLab task list syntax (`- [ ]`)
+- Project-specific checklist items
+- Focus on author self-confirmation before merge
+
+### Notes Section
+
+**Format:** `### Notes`
+**Source:** Manual or detected from commits
+**Content:**
+
+- Breaking changes with `**Breaking Change:**` prefix
+- Migration instructions if needed
+- Links to related issues/PRs
+
+## Section Selection
+
+If `--sections` is specified, only include listed sections:
+
+- `summary` → Include Summary section
+- `changes` → Include Changes section
+- `testing` → Include Testing section
+- `verify` → Include How to Verify section
+- `checklist` → Include Checklist section
+- `notes` → Include Notes section
+- `all` → Include all sections (default)
+
+Example: `--sections summary,changes,testing`
+
+## Output Format
+
+**IMPORTANT**: Generate PR descriptions using proper Markdown formatting for optimal rendering across all platforms (GitHub, GitLab, Bitbucket, etc.).
+
+### Markdown Structure Guidelines
+
+1. **Title**: Use `##` for the PR title (first line of description)
+2. **Sections**: Use `###` for main sections (Context, Implementation, Testing, etc.)
+3. **Subsections**: Use `####` for subsections within main sections
+4. **Lists**: Use proper bullet points `-` or numbered lists `1.`
+5. **Code**: Use fenced code blocks with language hints (```bash,```python, etc.)
+6. **Tables**: Use Markdown tables for structured data (file changes, test results, etc.)
+7. **Emphasis**: Use `**bold**` for key terms, `*italic*` for subtle emphasis
+8. **Links**: Use `[text](url)` format for references
+9. **Task Lists**: Use `- [ ]` and `- [x]` for verification checklists
+
+### Code Block Nesting Rules (CRITICAL)
+
+When the PR content itself contains code blocks (e.g., showing command examples, code snippets, or diff output), you **MUST** handle nesting correctly to prevent unclosed code blocks:
+
+**Rule 1: Use more backticks for outer blocks**
+When nesting code blocks, the outer block must use more backticks than the inner block:
+
+- Outer: 4+ backticks (````)
+- Inner: 3 backticks (```)
+
+**Rule 2: Never mix same-level backticks**
+Using 3 backticks for both outer and inner blocks will cause premature closing and broken formatting.
+
+**Example - Correct Nesting:**
+
+````markdown
+### How to Verify
+
+Run the following command:
+```bash
+pytest tests/auth/
+```
+
+Expected output:
+```
+=== test session starts ===
+collected 5 items
+```
+````
+
+**Example - Incorrect (will break):**
+
+```markdown
+### How to Verify
+```bash
+pytest tests/auth/
+```
+
+```  ← This closes the first block, leaving rest orphaned
+```
+
+**Rule 3: For terminal output mode**
+When outputting to terminal, wrap the entire PR in a code block with 4+ backticks:
+
+````text
+```markdown
+[PR content with internal ``` code blocks ```]
+```
+````
+
+**Rule 4: Backtick escaping in content**
+If you need to display literal backticks (`` ` ``) in PR content without starting a code block:
+
+- For single backtick: Use inline code syntax `` ` `` (wrap in single backticks)
+- For multiple backticks: Use HTML entity `&#96;` or wrap in more backticks than displayed
+
+### GitHub PR Format
+
+````markdown
+## type(scope): description
+
+> Brief summary of what this PR accomplishes (1-2 sentences)
+
+### Summary
+
+[High-level overview of changes and motivation]
+
+### Changes
+
+#### Key Modifications
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `path/to/file.py` | Modified | Brief description of change |
+| `path/to/another.py` | Added | Brief description of new file |
+
+#### Technical Details
+[Detailed explanation of implementation approach, architectural decisions, etc.]
+
+### Testing
+
+**Test Coverage:**
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+- [ ] Manual testing completed
+
+**Run Tests:**
+```bash
+[project-specific test commands]
+```
+
+### How to Verify
+
+1. [Step 1 - e.g., Checkout the branch]
+2. [Step 2 - e.g., Install dependencies]
+3. [Step 3 - e.g., Run tests with specific command]
+4. [Step 4 - e.g., Verify expected behavior]
+
+### Checklist
+
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Documentation updated (if applicable)
+- [ ] No new warnings introduced
+- [ ] Tests pass locally
+
+### Notes
+
+[Any additional notes, breaking changes, or migration instructions]
+
+---
+*Related: #[issue-number]* (if applicable)
+
+````
+
+### GitLab MR Format
+
+````markdown
+## type(scope): description
+
+> Brief summary of what this MR accomplishes (1-2 sentences)
+
+### Summary
+
+[High-level overview of changes and motivation]
+
+### Changes
+
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `path/to/file.py` | Modified | Brief description of change |
+
+#### Technical Details
+[Detailed explanation of implementation approach]
+
+### Testing
+
+**Test Coverage:**
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+
+**Run Tests:**
+```bash
+[project-specific test commands]
+```
+
+### How to Verify
+
+1. [Step 1 - e.g., Checkout the branch]
+2. [Step 2 - e.g., Install dependencies]
+3. [Step 3 - e.g., Run tests]
+
+### Checklist
+
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Documentation updated (if applicable)
+
+### Notes
+
+[Any additional notes or breaking changes]
+
+/label ~"[label]" @reviewer (if applicable)
+
+````
+
+### Section Content Guidelines
+
+#### Summary Section
+
+- Keep to 2-3 sentences maximum
+- Answer "What" and "Why" (not "How")
+- Use plain language accessible to all reviewers
+
+#### Changes Section
+
+- Use tables for file changes (improves readability)
+- Group related changes logically
+- Include change type: Added, Modified, Deleted, Renamed
+
+#### Testing Section
+
+- Use task lists for test coverage status
+- Include exact commands to run tests
+- Note any special test requirements
+
+#### How to Verify Section
+
+- Use numbered list for step-by-step verification
+- Include specific commands to run
+- Be precise and actionable (e.g., "Run `pytest tests/auth/`")
+- Include expected outcomes where helpful
+
+#### Checklist Section
+
+- Use GitHub/GitLab task list syntax `- [ ]`
+- Include project-specific checklist items
+- Focus on author self-confirmation before merge
+
+#### Notes Section
+
+- Highlight breaking changes with `**Breaking Change:**` prefix
+- Include migration instructions if needed
+- Link to related issues/PRs
+
+### Title Examples
+
+| Type | Example Title |
+|------|---------------|
+| Feature | `feat(auth): add OAuth2 login support` |
+| Bug Fix | `fix(api): resolve timeout issue in user endpoint` |
+| Refactor | `refactor(core): improve caching mechanism` |
+| Documentation | `docs: update API documentation` |
+| Performance | `perf(db): optimize query performance` |
+| Test | `test(auth): add unit tests for password validation` |
+
+## Edge Cases
+
+### EC-001: Branch Up to Date with Target
+
+**Scenario**: No commits ahead of target branch
+**Response**: "No changes detected between current branch and [target]. Nothing to generate."
+
+### EC-002: Invalid Target Branch
+
+**Scenario**: Target branch doesn't exist
+**Response**: "Target branch '[branch]' not found. Please verify the branch name."
+
+### EC-003: Not a Git Repository
+
+**Scenario**: Command run outside git repo
+**Response**: "Not a git repository. Please run this command from within a git repository."
+
+### EC-004b: Invalid Spec Path
+
+**Scenario**: `--spec` path doesn't exist
+**Response**: "Spec '[path]' not found. Available specs: [list specs in .codexspec/specs/]"
+
+### EC-005: Detached HEAD State
+
+**Scenario**: Repository in detached HEAD
+**Response**: "Cannot determine current branch. Please checkout a branch before generating PR description."
+
+### EC-006: No Remote Configured
+
+**Scenario**: No git remote configured
+**Handling**: Use GitHub terminology with warning: "No remote configured. Defaulting to GitHub terminology."
+
+## Output Modes
+
+### Terminal Output (Default)
+
+**CRITICAL**: When outputting to terminal, you MUST wrap the entire PR description in a markdown code block to preserve raw markdown formatting:
+
+````text
+```markdown
+## type(scope): description
+
+> Brief summary...
+
+### Summary
+[content]
+
+### Changes
+[content]
+
+... (all sections)
+```
+
+````
+
+This ensures users see the raw markdown source code, not the rendered output. Users can then copy the content inside the code block and paste it directly into GitHub/GitLab.
+
+### File Output (`--output`)
+
+When saving to a file, output the raw markdown content directly (without code block wrapper). The file will contain the actual PR description ready for use.
+
+## Important Notes
+
+- Always verify the current branch has commits ahead of target before generating
+- The PR description should be self-contained and understandable without external context
+- Include enough detail for reviewers to understand the changes
+- Do not include any AI attribution in the PR description
+- Focus on clarity and usefulness for code reviewers
+
+## Automatic Distillation
+
+Read `workflow.auto_distill` from `.codexspec/config.yml` (**default `true`** — enabled unless explicitly set to the literal `false`; absent or any non-`false` value means enabled).
+
+When `workflow.auto_distill` is enabled (not the literal `false`) AND a PR/MR description was generated successfully, invoke `$codexspec:distill` exactly once on this session's interaction, then end.
+
+- distill is non-blocking and non-interactive: it never prompts and never alters the generated description; it early-exits when there is nothing reusable to capture.
+- distill only writes records to `.codexspec/profile/`.
+- Do not invoke distill when `auto_distill` is disabled or when no description was produced.

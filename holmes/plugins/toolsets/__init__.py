@@ -20,6 +20,7 @@ from holmes.core.tools import (
     YAMLToolset,
 )
 from holmes.plugins.toolsets.atlas_mongodb.mongodb_atlas import MongoDBAtlasToolset
+from holmes.plugins.toolsets.aliyun_sls.aliyun_sls import AliyunSLSToolset
 from holmes.plugins.toolsets.bash.bash_toolset import BashExecutorToolset
 from holmes.plugins.toolsets.confluence.confluence import ConfluenceToolset
 from holmes.plugins.toolsets.connectivity_check import ConnectivityCheckToolset
@@ -125,6 +126,7 @@ def load_python_toolsets(
         SkillsToolset(dal=dal, additional_search_paths=additional_search_paths),
         multi_instance(ServiceNowTablesToolset),
         multi_instance(VictoriaLogsToolset),
+        multi_instance(AliyunSLSToolset),
         DatabaseToolset(),
         multi_instance(ElasticsearchDataToolset),
         multi_instance(ElasticsearchClusterToolset),

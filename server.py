@@ -27,7 +27,7 @@ from holmes.core.oauth_server_callbacks import get_toolset_oauth_config, handle_
 import sentry_sdk
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from litellm.exceptions import AuthenticationError
 from holmes import get_version, is_official_release
@@ -449,6 +449,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 _SERVER_START_TIME = time.time()
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 HOLMES_API_KEY = os.environ.get("HOLMES_API_KEY", "").strip()
 

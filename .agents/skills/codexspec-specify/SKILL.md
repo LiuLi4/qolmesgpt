@@ -1,0 +1,243 @@
+---
+name: codexspec:specify
+description: "澄清功能目标、范围和约束，将确认的需求整理为 requirements.md。"
+---
+
+# Requirement Discovery
+
+## Language Preference
+
+Read `.codexspec/config.yml`. Two independent language controls apply (each falls back to `language.output`, then English):
+
+- **Interaction language** (`language.interaction`): language for all conversation with the user — questions, explanations, status messages, and `codexspec` CLI terminal output.
+- **Document language** (`language.document`): language for generated artifact files (requirements/spec/plan/tasks).
+
+Converse in the interaction language and author artifacts in the document language. Apply the project's translation standard to both: translate by meaning (not word-for-word), keep English for terms with no good native equivalent, and write as if originally in that language.
+
+## Expression Standard
+
+**IMPORTANT**: Everything this command produces — documents, reviews, reports, commit messages, diagnostics, and replies — is written for a reader who cannot see your working context. Apply the rules below to every artifact and message you output:
+
+- **Write for the reader at hand-off.** Every reference must resolve without access to this session: no session-only identifiers or section numbers, no narration of what changed during the conversation, no arguments with absent reviewers. State current reality and cite committed, reachable sources.
+- **Preserve every proposition.** Before summarizing or trimming, list the facts a passage carries: actors, conditions, ordering, modalities (must, never), negative guarantees, and consequences. Remove only reasoning transcripts, repetition, and decoration. Shorter is not clearer if any fact is lost.
+- **State what the surface requires.** Diagnostics name what failed, which rule was violated, and the correction. Problem reports carry the defect, its location, its impact, and the evidence. Decisions record the alternatives they beat. Rejections give the reason in one line. Shipped work is described in the present tense; plans and open questions are labeled as such.
+- **Define terms before relying on them.** Prefer the concrete rule, field, or behavior over a coined label; give a project-specific term a plain-language definition at first use, then use it consistently.
+- **Be honest, not agreeable.** Verify claims before accepting them; fix or rebut on technical grounds. One substantiated blocker is worth more than a list of nitpicks. When a decision is needed, present only viable options, recommend one, and state the real difference between them.
+- **Declare what is binding.** Say explicitly which instructions are hard requirements and where judgment is required. Keep one explanation in one place and link to it, but keep at the point of use the contract a reader needs there.
+
+## Workspace Routing Before Writes
+
+This section governs the location of every later file, index, branch, and commit mutation.
+Record `SOURCE_ROOT` as the explicitly selected checkout (otherwise the invoking checkout) before
+changing working directories. Read its `.codexspec/config.yml`: `workflow.worktrees` defaults to
+on; only the literal boolean `false` disables it. Configuration remains checkout-local. Read-only
+inspection keeps its original source target and does not create a worktree merely to read files.
+
+- With `CODEXSPEC_AUTO_DEV_DELEGATION`, use the dedicated worktree supplied by auto-dev as
+  `OUTPUT_ROOT` throughout. `blueprint` and `auto-dev` themselves retain their existing fixed branch
+  `codexspec/auto-dev` and worktree `worktree-for-codexspec-auto-dev`; they always use the new shared
+  `<repository-name>-codexspec-worktrees` parent, irrespective of the ordinary isolation switch.
+- With ordinary isolation disabled, `OUTPUT_ROOT` is `SOURCE_ROOT` and existing in-place behavior
+  applies. `codexspec init`, both first-time setup and installation updates, is explicitly exempt:
+  it operates on its selected checkout regardless of this switch.
+- For a new ordinary feature (`specify`, `quick`, or another feature-creation entry), invoke the
+  installed platform create-new-feature script or `codexspec _worktree-helper create --name
+  <short-name>` before the first artifact write. Parse returned JSON rather than evaluating shell
+  output. `workspace`, `feature_dir`, and `requirements_file` are absolute paths; `branch` is the
+  full `<feature-id>-<feature-name>`. Set `OUTPUT_ROOT` to that workspace.
+- For an existing ordinary feature, resolve its explicit feature path/name first, otherwise its
+  current feature branch, using `codexspec _worktree-helper resolve --feature <full-feature-name>`.
+  Reuse that returned worktree. Do not silently pick another feature or create a replacement
+  from main. If an explicit feature path names another checkout, use that checkout's configuration
+  and preserve the identity of its documents and code.
+- For standalone project-level writes without a selected ordinary feature, use
+  `codexspec _worktree-helper route` from `SOURCE_ROOT`. An active feature workspace is reused;
+  otherwise the helper uses `worktree-for-codexspec-maintenance`. Use the returned absolute
+  workspace as `OUTPUT_ROOT`. Revalidate both source and destination rather than interpreting an
+  arbitrary existing directory as a managed workspace.
+
+When creation is interrupted, retain the returned `branch` and `workspace` even in an error
+response. Resume the same identity with `codexspec _worktree-helper create --feature
+<full-feature-name>`; a `creating` response from resolve requires this recovery step before
+merge verification. A new `--name` request never adopts an existing identity after a random
+name collision; report that collision and retry a new identity only for a genuinely new feature.
+
+A `ready` response is required before writing feature artifacts or continuing development. Exit
+status 3 with `merge_requires_resolution` or `merge_requires_verification` is a preparation handoff,
+not success. Resolve and stage conflicts only in the returned worktree. Leave a pending
+merge uncommitted. Run the project's required checks against the prepared files, then take a
+`codexspec _commit-staged-helper snapshot` in that worktree with its original index (no inherited
+GIT_INDEX_FILE). For a contentful merge, invoke `$codexspec:commit-staged -p` on that exact
+snapshot and retain its complete message. Describe changes as integrated changes; do not attribute
+all incoming code to conflict resolution. If the snapshot contains `default_message`, the merge
+only connects history: keep its message unchanged by supplying `message: null`.
+
+Call `codexspec _worktree-helper finish --feature <full-feature-name> --verification <json-file>`
+(use `worktree-for-codexspec-maintenance` for maintenance preparation). The JSON contains the
+verified `head`, staged `tree`, `checks` entries with `command` and integer `exit_code`, and,
+for a pending merge, the complete `analysis` snapshot and `message`. The finish helper rechecks
+and commits the same index. Never commit the pending merge directly or bypass a rejected snapshot.
+If recovery finds the commit already created, verify its current HEAD/tree and submit head/tree/checks
+without a new message. Never claim checks ran when they did not. If conflicts or checks cannot
+be resolved, stop and retain the same identity; do not create a second feature to bypass preparation.
+Fetch warnings indicate potentially stale remote information, not permission to bypass checks.
+
+Initial fixed auto-dev/blueprint workspace creation follows the same pending handoff. If acquisition
+or blueprint setup exits 3 with `merge_requires_resolution` or `merge_requires_verification`, use
+its returned `workspace`, resolve/stage/check/analyze as above, and call
+`codexspec _worktree-helper finish-initial --verification <json-file>`. Retry the original setup
+only after `ready`. The helper excludes active auto-dev owners and retains interrupted preparation.
+
+Every mutating tool call and later SDD invocation must explicitly use `OUTPUT_ROOT` or paths inside
+it. Before each file write, verify real filesystem containment: refuse symbolic links in the
+output path and existing destination files with multiple hard links. A lexical path beneath
+`OUTPUT_ROOT` alone does not establish isolation; never write through a link into another checkout.
+A `cd` in one shell subprocess does not change the agent's later tool working directories.
+Carry the same absolute workspace across stage handoffs. If required installation assets are
+absent in a new worktree, run normal installation explicitly against that destination, preserving
+existing project-authored files; stop if the required runtime or setup is unavailable.
+
+Preserve input provenance: artifact-only reviews/reverse specification can read `SOURCE_ROOT`
+while writing reports to `OUTPUT_ROOT`; their artifact containment checks apply to `OUTPUT_ROOT`.
+Source edits and executable checks use the selected feature workspace. `commit-staged` preview
+reads the original index; execution must stop if routing would substitute a different index or
+mutate the protected main checkout. Do not copy, stash, stage, reset, or discard caller-owned changes
+to make routing appear successful. Report an incompatible input/workspace and the required target
+instead. Existing command-specific prohibitions still apply.
+
+For configuration edits, decide routing from `SOURCE_ROOT`'s setting, then read and modify the
+configuration in `OUTPUT_ROOT`. A bare toggle uses the destination's value. Report the exact path
+and explain that other checkouts receive the setting through Git integration; do not add a shared
+override or imply immediate changes to main's effective value. Completion retains worktrees; it
+does not automatically merge to main or delete them. Any occupied path, invalid identity, failed
+creation, or unusable baseline is an explicit stop, never permission to fall back to main writes.
+
+## Historical Specs Before Decisions
+
+Use the CodexSpec Historical Specs guidance to prepare relevant background from
+`.codexspec/specs/` before substantive judgments or questions. Select related
+features and trace earlier and later confirmed decisions; read requirements first,
+then design, plans, or implementation evidence as the current scenario needs.
+Reuse sufficient background; supplement it when scope, evidence, or judgment needs
+change. Explain specific unresolved differences in concise questions instead of
+asking the user to reconstruct known history.
+
+The latest explicit user decision takes precedence over historical specs. History
+does not silently change current requirements, broaden the selected target, or
+override this command's write permissions or staged-only input restrictions.
+When a confirmed decision changes current requirements, use the owning requirements
+workflow to record it without asking the user to decide the same matter again.
+
+## User Input
+
+`the text after the $codexspec:specify skill mention`
+
+## Goal
+
+Turn the user discussion into a persistent, traceable `requirements.md`. The discussion is the richest source of intent, but only the user's confirmed stage summary becomes binding downstream authority.
+
+Do not generate `spec.md` in this command.
+
+## Feature Workspace
+
+### New Feature
+
+When `the text after the $codexspec:specify skill mention` is a new requirement:
+
+1. Derive a short kebab-case feature name.
+2. Run the platform create-new-feature script:
+   - Bash: `.codexspec/scripts/create-new-feature.sh --name "<feature-name>"`
+   - PowerShell: `.codexspec/scripts/create-new-feature.ps1 -ShortName "<feature-name>" "<description>"`
+3. Parse the created feature directory and `requirements.md` path.
+4. With worktree isolation enabled, require a `ready` result and carry its absolute workspace and
+   artifact paths throughout discovery. Follow Workspace Routing Before Writes for pending baseline
+   verification or failure; never continue by writing in the invoking checkout. Only explicit
+   disabled mode retains the existing unavailable-branch fallback.
+
+### Existing Feature
+
+When the argument identifies an existing feature:
+
+1. Use the explicit directory first.
+2. Otherwise match the current branch.
+3. If multiple features are possible, ask the user to select one. Never silently select the latest.
+4. Load the existing `requirements.md`.
+5. Legacy feature: if only `spec.md` exists, extract candidate entries from it, mark them `open`, and require user confirmation before they become authoritative.
+
+## Consult Project Profile
+
+Before discussing and finalizing requirements, read the project profile under `.codexspec/profile/` when it exists so the confirmed `requirements.md` is a synthesis that already accounts for accumulated project knowledge. Each category is a directory holding one record per file:
+
+- `constraints/` first — the project's hard prohibitions (highest weight); requirements MUST NOT contradict them.
+- `pitfalls/`, `conventions/`, `decisions/`, `strategies/`, `runbooks/` — read the records relevant to this feature's area, to avoid re-hitting known traps, to follow established conventions, to reuse past cross-feature/architectural decisions rather than re-litigating them, and to apply proven strategies and procedures.
+
+Each record carries a `status` (`candidate` or `vetted`); weight `candidate` entries with appropriate caution. Fold what is relevant into the discussion and the resulting entries; cite a profile record as evidence when it materially shapes a decision. This is the single point where the profile enters the SDD pipeline — downstream stages keep `requirements.md` as authority and do not re-read the profile. Degrade silently when the profile is absent or empty (nothing to apply); never block on it.
+
+## Discussion Rules
+
+- Ask one material question at a time.
+- Use structured choices when there are 2-4 meaningful options.
+- Explore user goals, workflows, constraints, error behavior, compatibility, scope boundaries, and important trade-offs.
+- Prefer the user's actual objective over generic methods or idealized architecture.
+- Distinguish the user's statement from AI inference.
+- Do not mark an inference as `confirmed`.
+- Record rejected alternatives only when they clarify a confirmed decision.
+- Do not preserve the entire chat transcript.
+
+## Candidate Entries
+
+Maintain candidate entries using:
+
+- `NEED-xxx`: goals and required behavior
+- `CON-xxx`: constraints and boundaries
+- `DEC-xxx`: confirmed trade-offs or choices
+- `OUT-xxx`: exclusions
+- `OPEN-xxx`: unresolved questions
+
+Each candidate includes a concise statement and, when useful, short **User Evidence**.
+
+## Stage Summary Confirmation
+
+After a coherent topic or at the end of discovery:
+
+1. Present a concise stage summary grouped by candidate IDs.
+2. Clearly separate:
+   - Proposed confirmed entries
+   - Open questions
+   - AI assumptions that still need confirmation
+3. Ask the user to confirm or correct the stage summary.
+4. Only after explicit confirmation:
+   - Write the entries to `requirements.md`.
+   - Set their status to `confirmed`.
+   - Append a Confirmation Log entry.
+5. If a decision changes, keep the old entry with `Status: superseded` and link it to the replacement.
+
+Do not treat silence or lack of objection as confirmation.
+
+## Completion
+
+Discovery is complete when:
+
+- The primary goal and required behaviors are confirmed.
+- Material constraints and exclusions are confirmed.
+- Important trade-offs are recorded.
+- Remaining open questions are either non-blocking or explicitly deferred.
+
+Report:
+
+- Feature directory
+- Requirements record path
+- Confirmed IDs
+- Open IDs and whether they block specification generation
+- Next command: `$codexspec:generate-spec <feature-dir>`
+
+## Auto-Next Chain Advance
+
+Read `workflow.auto_next` from `.codexspec/config.yml` (default `false`; only the literal value `true` enables it).
+
+When `workflow.auto_next` is `true` AND discovery is complete — the Completion criteria above are met and the user has explicitly confirmed the final stage summary (not each intermediate topic confirmation) — advance the chain automatically:
+
+1. Emit exactly one notice line, in the interaction language, e.g. `auto_next: requirements confirmed → invoking $codexspec:generate-spec <feature-dir>`.
+2. Invoke `$codexspec:generate-spec <feature-dir>` exactly once, then end this command.
+
+Do not auto-advance on intermediate topic confirmations, or when `workflow.auto_next` is disabled (absent, `false`, or non-`true`); in those cases report normally and hand off to the next command manually. This advances the chain and does not modify the Completion report.
