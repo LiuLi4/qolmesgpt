@@ -152,3 +152,60 @@ test("context collection filters exact request IDs, redacts secrets and reads on
     assert.match(output, /contextDiagnostics/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("investigation snapshots cover all task statistics and retain older causal events", { skip: !process.env.DATABASE_URL }, async () => {
+  const db = await isolatedDatabase(process.env.DATABASE_URL!);
+  const p = db.prisma;
+  try {
+    const user = await p.user.create({ data: { authSubject: randomUUID() } });
+    const connection = await p.gitLabConnection.create({ data: { userId: user.id, instanceUrl: "https://example.test", authType: "PAT", accessTokenCiphertext: "test", credentialKeyVersion: "v1" } });
+    const group = await p.gitLabGroup.create({ data: { connectionId: connection.id, externalGroupId: "1", fullPath: "group" } });
+    const workspace = await p.groupWorkspace.create({ data: { groupId: group.id, relativePath: "group", status: "READY" } });
+    const source = await p.dataSourceConnection.create({ data: { workspaceId: workspace.id, type: "ALIYUN_SLS", configJson: {}, credentialsCiphertext: "test", credentialKeyVersion: "v1" } });
+    const rows = [];
+    for (let i = 0; i < 48; i++) {
+      rows.push({ dataSourceConnectionId: source.id, sourcePositionKey: `completed-${i}`, sourceTimestamp: new Date(1795500000000 + i * 1000), correlationKey: `trace:t${i}`, traceId: `t${i}`, fingerprint: "502", logEvidenceJson: { msg: "request completed", status: 502, traceId: `t${i}` } });
+      if (i < 9) for (const msg of ["金融商响应异常", "finance user-auth 上游异常"]) rows.push({ dataSourceConnectionId: source.id, sourcePositionKey: `${msg}-${i}`, sourceTimestamp: new Date(1795490000000 + i * 1000), correlationKey: `trace:t${i}`, traceId: `t${i}`, fingerprint: msg, logEvidenceJson: { content: { msg, status: 503, errorCode: "C0001", traceId: `t${i}` } } });
+    }
+    await p.errorEvent.createMany({ data: rows });
+    const anchor = await p.errorEvent.findFirstOrThrow();
+    const task = await p.investigationTask.create({ data: { workspaceId: workspace.id, errorEventId: anchor.id, occurrenceCount: 66, requestCount: 48 } });
+    await p.errorEvent.updateMany({ data: { taskId: task.id } });
+    await p.outboxMessage.create({ data: { aggregateType: "InvestigationTask", aggregateId: task.id, eventType: "InvestigationRequested", payload: {} } });
+    const job = await new PrismaInvestigationStore(p).claim("tester");
+    assert.ok(job);
+    assert.equal(job.evidenceSummary?.totalLogs, 66);
+    assert.equal(job.evidenceSummary?.totalRequests, 48);
+    assert.equal(job.evidenceSummary?.requestsWithDiagnosticLogs, 9);
+    assert.equal(job.evidenceSummary?.requestsWithoutDiagnosticLogs, 39);
+    assert.equal(job.relatedLogs.length, 66);
+    assert.match(JSON.stringify(job.relatedLogs), /金融商响应异常/);
+    assert.equal(job.evidenceSummary?.messageTypes.find((t) => t.message === "金融商响应异常")?.logs, 9);
+    await p.errorEvent.createMany({ data: Array.from({ length: 300 }, (_, i) => ({ taskId: task.id, dataSourceConnectionId: source.id, sourcePositionKey: `extra-${i}`, sourceTimestamp: new Date(1795600000000 + i * 1000), correlationKey: `trace:extra-${i}`, traceId: `extra-${i}`, fingerprint: "502", logEvidenceJson: { msg: "request completed", status: 502 } })) });
+    const first = await p.outboxMessage.findFirstOrThrow();
+    await p.outboxMessage.update({ where: { id: first.id }, data: { claimOwner: null, claimedAt: null } });
+    const larger = await new PrismaInvestigationStore(p).claim("tester-2");
+    assert.equal(larger?.evidenceSummary?.totalLogs, 366);
+    assert.equal(larger?.evidenceSummary?.totalRequests, 348);
+    assert.equal(larger?.evidenceSummary?.requestsWithDiagnosticLogs, 9);
+    assert.equal(larger?.relatedLogs.length, 200);
+    const snapshot = JSON.stringify(larger?.relatedLogs);
+    assert.match(snapshot, /金融商响应异常/);
+    assert.match(snapshot, /finance user-auth 上游异常/);
+
+  } finally { await db.close(); }
+});
+
+
+test("context searches a diagnostic request before unrelated recent completion requests", async () => {
+  const queries: string[] = [];
+  const source = { id: "s", workspaceId: "w", endpoint: "https://cn-shanghai.log.aliyuncs.com", project: "p", logstore: "l", accessKeyId: "id", accessKeySecret: "secret" };
+  const adapter = new AliyunSlsAdapter({ create: () => ({ getProject: async () => ({}), getLogStore: async () => ({}), getLogs: async (_project: string, _store: string, _from: Date, _to: Date, params: { query: string }) => { queries.push(params.query); return []; } }) });
+  const rows = Array.from({ length: 12 }, (_, i) => ({ timestamp: "2026-11-24T10:00:00Z", correlationKey: `trace:completion-${i}`, traceId: `completion-${i}`, log: { msg: "request completed", status: 502 } }));
+  rows.push({ timestamp: "2026-11-24T09:00:00Z", correlationKey: "trace:causal", traceId: "causal", log: { msg: "finance user-auth 上游异常", status: 503 } });
+  const job = { outboxId: "o", taskId: "t", projectId: null, workspaceId: "w", errorEventId: "e", errorEvidence: {}, relatedLogs: rows, evidenceVersion: 1, projectPath: "g", workspacePath: null, attempts: 1 };
+  await prepareInvestigation(job, { listEnabled: async () => [source] } as unknown as PrismaSlsDetectionStore, "/missing-checkout", adapter);
+  assert.match(queries[0]!, /causal/);
+  assert.equal(queries.length, 6);
+});

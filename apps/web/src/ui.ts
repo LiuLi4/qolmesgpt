@@ -107,7 +107,7 @@ var labels={INVESTIGATION_PENDING:'待调查',INVESTIGATING:'调查中',AWAITING
 document.getElementById('task-detail-meta').textContent='状态：'+(labels[data.status]||data.status)+' · 错误日志 '+data.occurrenceCount+' 条 · 请求 '+data.requestCount+' 次\n首次：'+formatTime(data.firstSeenAt)+' · 最近：'+formatTime(data.lastSeenAt)+(data.mergedIntoTaskId?'\n已归并至任务：'+data.mergedIntoTaskId:'');
 var result=data.investigation||{};var logs=data.groupedLogs||[];
 document.getElementById('task-detail-logs').textContent=logs.length?'聚合日志（最多展示 100 条）\n\n'+JSON.stringify(logs,null,2):data.logEvidence?JSON.stringify(data.logEvidence,null,2):'尚无错误日志证据。';
-document.getElementById('task-context-logs').textContent=result.evidence?JSON.stringify(result.evidence.relatedLogs||[],null,2):'尚未取得同请求上下文。';
+document.getElementById('task-context-logs').textContent=result.evidence?JSON.stringify({taskSummary:result.evidence.summary||'旧调查未记录全任务统计',selection:result.evidence.selection||'旧调查未记录取证覆盖率',relatedLogs:result.evidence.relatedLogs||[]},null,2):'尚未取得同请求上下文。';
 var lines=[];if(result.summary)lines.push(result.summary,'','根因',result.rootCause,'','修复建议',result.proposedFix,'','置信度：'+result.confidence,'','代码与日志依据',...(result.codeContext||[]));else lines.push(result.errorCode?'调查失败：'+result.errorCode:'正在等待或执行 HolmesGPT 调查…');
 if(data.mergedIntoTaskId)lines.unshift('本任务已归并，请查看主任务的最新调查结论。','');
 document.getElementById('task-detail-content').textContent=lines.join('\n');

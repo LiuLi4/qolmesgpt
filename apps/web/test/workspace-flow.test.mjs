@@ -283,13 +283,14 @@ test("workspace and log source selectors share the top context and show live log
 test("task detail displays the full task ID and separates error evidence from investigation conclusions", async () => {
   const task = { id: "351c324a-4034-4384-9ee9-a311b2a1c666", workspaceId: "ready", title: "Request error", status: "AWAITING_APPROVAL", occurrenceCount: 5, requestCount: 5,
     groupedLogs: [{ logEvidenceJson: { msg: "raw-error-evidence", status: "502" } }],
-    investigation: { summary: "investigation-summary", rootCause: "root-cause", proposedFix: "fix-proposal", confidence: "low", codeContext: ["handler.ts:12"], evidence: { relatedLogs: [{ msg: "request-context" }] } } };
+    investigation: { summary: "investigation-summary", rootCause: "root-cause", proposedFix: "fix-proposal", confidence: "low", codeContext: ["handler.ts:12"], evidence: { relatedLogs: [{ msg: "request-context" }], summary: { totalLogs: 66, totalRequests: 48 }, selection: { omittedLogs: 2 } } } };
   const ui = await openPage([workspace("ready")], [], [task]);
   ui.taskCards[0].click();
   await setImmediate();
   assert.equal(ui.elements.get("task-detail-id").textContent, `任务 ID：${task.id}`);
   assert.match(ui.elements.get("task-detail-logs").textContent, /raw-error-evidence/);
   assert.match(ui.elements.get("task-context-logs").textContent, /request-context/);
+  assert.match(ui.elements.get("task-context-logs").textContent, /totalLogs[\s\S]*66[\s\S]*omittedLogs[\s\S]*2/);
   assert.match(ui.elements.get("task-detail-content").textContent, /investigation-summary[\s\S]*root-cause[\s\S]*fix-proposal/);
   assert.doesNotMatch(ui.elements.get("task-detail-content").textContent, /raw-error-evidence|request-context/);
   assert.match(ui.elements.get("task-detail-meta").textContent, /待审批 · 错误日志 5 条 · 请求 5 次/);

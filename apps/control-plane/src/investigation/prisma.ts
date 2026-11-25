@@ -1,3 +1,4 @@
+import { loadTaskEvidence, type EvidenceSummary } from "./evidence.js";
 import { Prisma, type PrismaClient } from "../generated/prisma/client.js";
 
 export interface InvestigationJob {
@@ -10,6 +11,7 @@ export interface InvestigationJob {
   readonly errorEvidence: Prisma.JsonValue;
   readonly relatedLogs: readonly Prisma.JsonValue[];
   readonly evidenceVersion: number;
+  readonly evidenceSummary?: EvidenceSummary;
   readonly projectPath: string;
   readonly workspacePath: string | null;
   readonly attempts: number;
@@ -57,12 +59,12 @@ export class PrismaInvestigationStore {
           workspace: { select: { relativePath: true, group: { select: { fullPath: true } }, repositories: { where: { active: true }, select: { project: { select: { id: true, pathWithNamespace: true, workspace: { select: { relativePath: true, status: true } } } } } } } },
           errorEventId: true,
           errorEvent: { select: { logEvidenceJson: true } },
-          events: { orderBy: { sourceTimestamp: "desc" }, take: 50, select: { logEvidenceJson: true, correlationKey: true, traceId: true, requestId: true, sourceTimestamp: true } },
           evidenceVersion: true,
           project: { select: { pathWithNamespace: true, workspace: { select: { relativePath: true } } } },
         },
       });
       if (!task) return null;
+      const snapshot = await loadTaskEvidence(tx, task.id);
 
       await tx.investigationTask.updateMany({ where: { id: task.id, status: "INVESTIGATION_PENDING" }, data: { status: "INVESTIGATING" } });
       return {
@@ -73,7 +75,8 @@ export class PrismaInvestigationStore {
         repositories: task.workspace?.repositories.map(({ project }) => ({ id: project.id, projectPath: project.pathWithNamespace, workspacePath: project.workspace?.status === "READY" ? project.workspace.relativePath : null })),
         errorEventId: task.errorEventId,
         errorEvidence: task.errorEvent.logEvidenceJson,
-        relatedLogs: task.events.map((event) => ({ timestamp: event.sourceTimestamp.toISOString(), correlationKey: event.correlationKey, traceId: event.traceId, requestId: event.requestId, log: event.logEvidenceJson })) as unknown as Prisma.JsonValue[],
+        relatedLogs: snapshot.logs,
+        evidenceSummary: snapshot.summary,
         evidenceVersion: task.evidenceVersion,
         projectPath: task.workspace?.group.fullPath ?? task.project?.pathWithNamespace ?? "Unknown scope",
         workspacePath: task.workspace?.relativePath ?? task.project?.workspace?.relativePath ?? null,

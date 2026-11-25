@@ -77,3 +77,27 @@ test("Holmes HTTP requests propagate an external cancellation signal", async () 
   });
   await assert.rejects(client.investigate(job, controller.signal), { name: "AbortError" });
 });
+
+test("investigation input preserves causal logs after repetitive completion records exceed the budget", async () => {
+  let ask = "";
+  const logs = Array.from({ length: 48 }, (_, i) => ({ eventId: `completion-${i}`, traceId: `trace-${i}`, timestamp: new Date(1795500000000 + i * 1000).toISOString(), log: { msg: "request completed", status: 502, method: "POST", padding: "x".repeat(2500) } }));
+  for (let i = 0; i < 9; i++) {
+    logs.push({ eventId: `upstream-${i}`, traceId: `trace-${i}`, timestamp: new Date(1795499999900 + i * 1000).toISOString(), log: { msg: "金融商响应异常 C0001", status: 503, method: "POST", padding: "" } });
+    logs.push({ eventId: `handler-${i}`, traceId: `trace-${i}`, timestamp: new Date(1795499999950 + i * 1000).toISOString(), log: { msg: "finance user-auth 上游异常", status: 503, method: "POST", padding: "" } });
+  }
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async (_url, init) => {
+    ask = JSON.parse(String(init?.body)).ask;
+    return new Response(JSON.stringify({ analysis: { summary: "s", rootCause: "r", proposedFix: "p", codeContext: [], confidence: "low", affectedProjectIds: [] } }));
+  });
+  const result = await client.investigate({ ...job, relatedLogs: logs });
+  assert.match(ask, /金融商响应异常 C0001/);
+  assert.match(ask, /finance user-auth 上游异常/);
+  assert.match(JSON.stringify(result.evidence), /upstream-0/);
+  assert.match(ask, /same symptom does not establish the same root cause/);
+  assert.ok(result.evidence?.selection?.omittedLogs !== undefined);
+  assert.ok(JSON.stringify(result.evidence?.relatedLogs).length <= 60_000);
+  const payload = result.evidence?.relatedLogs as { timestamp: string; requestKey: string; log: { msg: string } }[];
+  assert.equal(payload.filter((r) => r.log.msg.includes("上游异常")).length, 9);
+  const firstRequest = payload.filter((r) => r.requestKey === "trace:trace-0");
+  assert.deepEqual(firstRequest.map((r) => r.log.msg), ["金融商响应异常 C0001", "finance user-auth 上游异常", "request completed"]);
+});

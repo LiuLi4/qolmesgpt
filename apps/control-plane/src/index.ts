@@ -29,3 +29,6 @@ export { DataSourceRoutes } from "./routes/data-sources.js";
 export { GitRepositoryCheckout, GroupWorkspaceService } from "./workspace/group.js";
 
 export { WorkspaceAutomationService } from "./workspace/automation.js";
+
+export { packInvestigationEvidence, prioritizeEvidence } from "./investigation/evidence.js";
+export type { EvidenceSummary } from "./investigation/evidence.js";
