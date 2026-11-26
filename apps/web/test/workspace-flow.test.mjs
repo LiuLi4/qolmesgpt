@@ -63,12 +63,13 @@ async function openPage(workspaces, sources = [], tasks = []) {
     fetch: async (url, options) => {
       if (url.startsWith("/api/state")) { stateCalls++; return response(state); }
       if (url === "/api/gitlab/connections") return response({ connections: [{ id: "connection", status: "ACTIVE", instanceUrl: "http://git.example" }] });
-      if (url.endsWith("/groups")) return response({ items: [{ id: "group", fullPath: "acme/platform", role: "MAINTAINER" }] });
+      if (url.includes("/groups")) return response({ items: [{ id: "group", fullPath: "acme/platform", role: "MAINTAINER" }] });
       if (/^\/api\/workspaces\/[^/]+\/automation$/.test(url)) {
         const id = url.split("/")[3]; const enabled = JSON.parse(options.body).enabled;
         state = { ...state, workspaces: state.workspaces.map((workspace) => workspace.id === id ? { ...workspace, automationEnabled: enabled } : workspace) };
         return response({ automationEnabled: enabled, message: enabled ? "已开启" : "已暂停" });
       }
+      if (url.endsWith("/repository-groups")) return response({ version: 0, connectionId: "connection", nodes: [] });
       if (url === "/api/workspaces") { createCalls++; return new Promise((resolve) => { pendingCreate = resolve; }); }
       if (url === "/api/sls/verify") { slsRequests.push(JSON.parse(options.body)); return new Promise((resolve) => { pendingSls = resolve; }); }
       if (url.startsWith("/api/tasks/")) {

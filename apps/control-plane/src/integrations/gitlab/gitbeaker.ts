@@ -9,6 +9,22 @@ function pageFrom<T>(response: PaginatedResponse<T[], "offset">): GitLabPage<T> 
 export class GitBeakerApi implements GitLabApi {
   constructor(private readonly client: Gitlab<false>) {}
 
+  async getProject(projectId: string): Promise<GitLabProjectSummary> {
+    const p = await this.client.Projects.show(projectId);
+    return { id: String(p.id), groupId: String(p.namespace.id), namespacePath: p.namespace.full_path, remoteUrl: p.http_url_to_repo, name: p.name, pathWithNamespace: p.path_with_namespace, defaultBranch: p.default_branch ?? "main", webUrl: p.web_url };
+  }
+
+  async listBranches(projectId: string, page = 1) {
+    const response = await this.client.Branches.all(projectId, { pagination: "offset", page, perPage: 100, showExpanded: true });
+    const result = pageFrom(response);
+    return { ...result, items: result.items.map((b) => ({ name: b.name, commitSha: b.commit.id })) };
+  }
+
+  async getBranch(projectId: string, branch: string) {
+    const result = await this.client.Branches.show(projectId, branch);
+    return { name: result.name, commitSha: result.commit.id };
+  }
+
   async currentUser(): Promise<GitLabUser> {
     const user = await this.client.Users.showCurrentUser();
     return { id: user.id, username: user.username, name: user.name };
@@ -67,7 +83,7 @@ export class GitBeakerApi implements GitLabApi {
 }
 
 export const gitBeakerApiFactory = {
-  create(instanceUrl: string, accessToken: string): GitLabApi {
-    return new GitBeakerApi(new Gitlab({ host: instanceUrl, token: accessToken }));
+  create(instanceUrl: string, accessToken: string, options: { queryTimeout?: number } = {}): GitLabApi {
+    return new GitBeakerApi(new Gitlab({ host: instanceUrl, oauthToken: accessToken, ...options }));
   },
 };

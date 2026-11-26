@@ -10,7 +10,7 @@ set -e
 
 DOCS_DIR="${1:-docs}"
 SOURCE_LANG="en"
-shift
+if [ "$#" -gt 0 ]; then shift; fi
 TARGET_LANGS="$*"
 
 # Colors for output
@@ -25,6 +25,9 @@ if [ ! -d "$DOCS_DIR" ]; then
     echo "Error: Docs directory '$DOCS_DIR' not found"
     exit 2
 fi
+
+# Resolve once before later directory changes so relative arguments remain valid.
+DOCS_DIR="$(cd "$DOCS_DIR" && pwd)"
 
 # Get target languages if not specified
 if [ -z "$TARGET_LANGS" ]; then

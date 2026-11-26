@@ -6,7 +6,7 @@ export interface InvestigationJob {
   readonly taskId: string;
   readonly projectId: string | null;
   readonly workspaceId?: string | null;
-  readonly repositories?: readonly { id: string; projectPath: string; workspacePath: string | null }[];
+  readonly repositories?: readonly { id: string; projectPath: string; workspacePath: string | null; branch?: string; externalProjectId?: string }[];
   readonly errorEventId: string;
   readonly errorEvidence: Prisma.JsonValue;
   readonly relatedLogs: readonly Prisma.JsonValue[];
@@ -56,7 +56,7 @@ export class PrismaInvestigationStore {
           id: true,
           projectId: true,
           workspaceId: true,
-          workspace: { select: { relativePath: true, group: { select: { fullPath: true } }, repositories: { where: { active: true }, select: { project: { select: { id: true, pathWithNamespace: true, workspace: { select: { relativePath: true, status: true } } } } } } } },
+          workspace: { select: { relativePath: true, group: { select: { fullPath: true } }, repositories: { where: { active: true }, select: { investigationBranch: true, project: { select: { id: true, externalProjectId: true, pathWithNamespace: true, workspace: { select: { relativePath: true, status: true } } } } } } } },
           errorEventId: true,
           errorEvent: { select: { logEvidenceJson: true } },
           evidenceVersion: true,
@@ -72,7 +72,7 @@ export class PrismaInvestigationStore {
         taskId: task.id,
         projectId: task.projectId,
         workspaceId: task.workspaceId,
-        repositories: task.workspace?.repositories.map(({ project }) => ({ id: project.id, projectPath: project.pathWithNamespace, workspacePath: project.workspace?.status === "READY" ? project.workspace.relativePath : null })),
+        repositories: task.workspace?.repositories.map(({ project, investigationBranch }) => ({ id: project.id, externalProjectId: project.externalProjectId, branch: investigationBranch, projectPath: project.pathWithNamespace, workspacePath: project.workspace?.status === "READY" ? project.workspace.relativePath : null })),
         errorEventId: task.errorEventId,
         errorEvidence: task.errorEvent.logEvidenceJson,
         relatedLogs: snapshot.logs,
@@ -99,7 +99,7 @@ export class PrismaInvestigationStore {
       }
       const targets = [...new Set(result.affectedProjectIds ?? (task.projectId ? [task.projectId] : []))];
       if (task.workspaceId && targets.length) {
-        const count = await tx.workspaceRepository.count({ where: { workspaceId: task.workspaceId, active: true, projectId: { in: targets }, project: { workspace: { status: "READY" } } } });
+        const count = await tx.workspaceRepository.count({ where: { workspaceId: task.workspaceId, active: true, projectId: { in: targets } } });
         if (count !== targets.length) throw new Error("HOLMES_INVALID_REPOSITORY_TARGET");
       } else if (!task.workspaceId && targets.some((id) => id !== task.projectId)) throw new Error("HOLMES_INVALID_REPOSITORY_TARGET");
       await tx.taskRepository.deleteMany({ where: { taskId: message.aggregateId } });

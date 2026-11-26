@@ -23,6 +23,9 @@ if [ ! -d "$DOCS_DIR" ]; then
     exit 2
 fi
 
+# Resolve once before later directory changes so relative arguments remain valid.
+DOCS_DIR="$(cd "$DOCS_DIR" && pwd)"
+
 # Check if source language directory exists
 if [ ! -d "$DOCS_DIR/$SOURCE_LANG" ]; then
     echo "Error: Source language directory '$DOCS_DIR/$SOURCE_LANG' not found"

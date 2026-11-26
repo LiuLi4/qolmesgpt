@@ -150,6 +150,9 @@ test("context collection filters exact request IDs, redacts secrets and reads on
     assert.match(output, /handler.ts/);
     assert.doesNotMatch(output, /customer-secret|credential-secret|private token|unrelated|export const domain/);
     assert.match(output, /contextDiagnostics/);
+    const legacy = await prepareInvestigation({ ...job, workspaceId: null, projectId: "r" }, { listEnabled: async () => [] } as unknown as PrismaSlsDetectionStore, root, adapter, async () => { throw new Error("Workspace snapshots must not replace legacy project checkout evidence"); });
+    assert.match(JSON.stringify(legacy.codeEvidence), /handler.ts/);
+    assert.equal(legacy.repositoryVersions, undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -208,4 +211,27 @@ test("context searches a diagnostic request before unrelated recent completion r
   await prepareInvestigation(job, { listEnabled: async () => [source] } as unknown as PrismaSlsDetectionStore, "/missing-checkout", adapter);
   assert.match(queries[0]!, /causal/);
   assert.equal(queries.length, 6);
+});
+
+test("investigation snapshots disclose a failed repository while preserving successful actual SHA metadata", async () => {
+  const job = { outboxId: "o", taskId: "t", projectId: null, workspaceId: "w", errorEventId: "e", errorEvidence: { msg: "failed C0001" }, relatedLogs: [], evidenceVersion: 1, projectPath: "group", workspacePath: null, attempts: 1, repositories: [{ id: "ok", projectPath: "one/api", branch: "dev", workspacePath: null }, { id: "bad", projectPath: "two/api", branch: "staging", workspacePath: null }] };
+  const prepared = await prepareInvestigation(job, { listEnabled: async () => [] } as unknown as PrismaSlsDetectionStore, "/missing", undefined, async (repo) => {
+    if(repo.id === "bad")throw new Error("credential-like-private-error");
+    return { version: { projectId: repo.id, projectPath: repo.projectPath, branch: repo.branch!, commitSha: "a".repeat(40), readAt: new Date().toISOString(), status: "READ" }, search: async () => ["handler.ts:1"], close: async () => {} };
+  });
+  assert.equal(prepared.repositoryVersions?.[0]?.commitSha,"a".repeat(40));
+  assert.equal(prepared.repositoryVersions?.[1]?.commitSha,null);
+  assert.equal(prepared.repositoryVersions?.[1]?.status,"FAILED");
+  assert.match(JSON.stringify(prepared),/REPOSITORY_READ_FAILED/);
+  assert.doesNotMatch(JSON.stringify(prepared),/credential-like-private-error/);
+});
+
+
+test("repository evidence preserves only safe classified failures and never upstream messages", async () => {
+  const codes = ["REPOSITORY_ACCESS_UNAVAILABLE", "REPOSITORY_API_TIMEOUT", "REPOSITORY_IDENTITY_CHANGED", "token=private-provider-response"];
+  const job = { outboxId: "o", taskId: "t", projectId: null, workspaceId: "w", errorEventId: "e", errorEvidence: {}, relatedLogs: [], evidenceVersion: 1, projectPath: "g", workspacePath: null, attempts: 1, repositories: codes.map((code, index) => ({ id: String(index), projectPath: `g/p${index}`, branch: "dev", workspacePath: null })) };
+  const prepared = await prepareInvestigation(job, { listEnabled: async () => [] } as unknown as PrismaSlsDetectionStore, "/missing", undefined, async (repo) => { throw new Error(codes[Number(repo.id)]); });
+  assert.deepEqual(prepared.repositoryVersions?.map(v => v.errorCode), [...codes.slice(0, 3), "REPOSITORY_READ_FAILED"]);
+  assert.ok(prepared.repositoryVersions?.every(v => v.commitSha === null && v.status === "FAILED"));
+  assert.doesNotMatch(JSON.stringify(prepared), /private-provider-response/);
 });

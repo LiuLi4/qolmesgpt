@@ -152,9 +152,27 @@ export class GitLabService {
     throw new Error("GitLab Group exceeds the 100000-project synchronization limit");
   }
 
-  async listProjects(userId: string, connectionId: string, groupId: string, page = 1): Promise<GitLabPage<GitLabProjectSummary>> {
+  async listProjects(userId: string, connectionId: string, groupId: string, page = 1, includeSubgroups = false): Promise<GitLabPage<GitLabProjectSummary>> {
     const api = await this.apiFor(userId, connectionId);
-    return api.listGroupProjects(groupId, page);
+    return api.listGroupProjects(groupId, page, includeSubgroups);
+  }
+
+  async getProject(userId: string, connectionId: string, projectId: string) {
+    const api = await this.apiFor(userId, connectionId);
+    if (!api.getProject) throw new Error("GitLab project lookup unavailable");
+    return api.getProject(projectId);
+  }
+
+  async listBranches(userId: string, connectionId: string, projectId: string, page = 1) {
+    const api = await this.apiFor(userId, connectionId);
+    if (!api.listBranches) throw new Error("GitLab branch lookup unavailable");
+    return api.listBranches(projectId, page);
+  }
+
+  async getBranch(userId: string, connectionId: string, projectId: string, branch: string) {
+    const api = await this.apiFor(userId, connectionId);
+    if (!api.getBranch) throw new Error("GitLab branch lookup unavailable");
+    return api.getBranch(projectId, branch);
   }
 
   async getApprovalRole(userId: string, connectionId: string, groupId: string): Promise<{ role: ReturnType<typeof mapGitLabRole>; eligible: boolean; checkedAt: string }> {

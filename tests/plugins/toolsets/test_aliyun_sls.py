@@ -123,6 +123,11 @@ class TestAliyunSLSTools:
         assert missing.status == StructuredToolResultStatus.ERROR
         assert "trace_id or request_id" in missing.error
 
+        service_only = tool._invoke({"service": "ec-saas"}, None)
+        assert service_only.status == StructuredToolResultStatus.ERROR
+        assert "trace_id or request_id" in service_only.error
+        assert client.requests == []
+
         result = tool._invoke({"trace_id": 'trace"-1', "service": "ec-saas"}, None)
         assert result.status == StructuredToolResultStatus.NO_DATA
         assert client.requests[0].query == 'traceId:"trace\\"-1" AND service:"ec-saas"'

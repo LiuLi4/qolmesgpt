@@ -83,6 +83,7 @@ test("a Group Workspace enrolls every accessible descendant repository and prepa
   const repositoryLinks = new Map<string, { workspaceId: string; projectId: string; active: boolean }>();
   const checkoutRecords = new Map<string, { id: string; relativePath: string; status: string }>();
   const fakePrisma = {
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback(fakePrisma),
     gitLabGroup: { upsert: async ({ create }: { create: { connectionId: string; externalGroupId: string; fullPath: string } }) => ({ id: create.externalGroupId === "root-1" ? "root-1" : create.externalGroupId, ...create }) },
     groupWorkspace: {
       upsert: async () => workspace,
@@ -126,4 +127,19 @@ test("Group Workspace checkout paths reject traversal and symlinks", async (t) =
   await mkdir(resolve(root, "groups"));
   await symlink(outside, resolve(root, "groups/link"));
   await assert.rejects(safeWorkspacePath(root, "groups/link/repo"), /symlinks/);
+});
+
+
+test("synchronization claim rejects a concurrent manual configuration committed after the initial read", async () => {
+  const prisma = {
+    groupWorkspace: {
+      findFirst: async () => ({ id: "w", repositoryConfigManaged: false, repositoryConfigVersion: 0 }),
+      updateMany: async ({where}: {where: Record<string,unknown>}) => {
+        assert.equal(where.repositoryConfigManaged,false);
+        assert.equal(where.repositoryConfigVersion,0);
+        return { count: 0 };
+      },
+    },
+  };
+  await assert.rejects(new GroupWorkspaceService(prisma as never,{} as never,"/unused").synchronize("u","w"),/already running/);
 });

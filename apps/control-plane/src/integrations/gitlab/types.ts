@@ -40,6 +40,9 @@ export interface GitLabMembership {
 
 export interface GitLabApi {
   currentUser(): Promise<GitLabUser>;
+  getProject?(projectId: string): Promise<GitLabProjectSummary>;
+  listBranches?(projectId: string, page?: number): Promise<GitLabPage<{ name: string; commitSha: string }>>;
+  getBranch?(projectId: string, branch: string): Promise<{ name: string; commitSha: string }>;
   getGroup(groupId: string): Promise<GitLabGroupSummary>;
   listGroups(page?: number): Promise<GitLabPage<GitLabGroupSummary>>;
   listGroupProjects(groupId: string, page?: number, includeSubgroups?: boolean): Promise<GitLabPage<GitLabProjectSummary>>;

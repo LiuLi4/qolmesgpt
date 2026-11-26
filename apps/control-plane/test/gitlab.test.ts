@@ -187,7 +187,7 @@ test("PAT validation and group/project pagination use real GitBeaker list respon
     const url = new URL(req.url!, "http://127.0.0.1");
     requests.push(url.pathname + url.search);
     res.setHeader("content-type", "application/json");
-    if (req.headers["private-token"] !== "fixture-token") {
+    if (req.headers.authorization !== "Bearer fixture-token") {
       res.writeHead(401);
       res.end(JSON.stringify({ message: "Unauthorized" }));
       return;
@@ -243,4 +243,33 @@ test("PAT validation and group/project pagination use real GitBeaker list respon
   assert.deepEqual(workspaceProjects.map((project) => project.pathWithNamespace), ["team-1/service"]);
   assert.ok(requests.some((request) => request.includes("include_subgroups=true") && request.includes("with_shared=false")));
   assert.equal(requests.length, 8);
+});
+
+test("investigation project lookup bounds SDK backoff and transport timeout", async (t) => {
+  const { readInvestigationProject } = await import("../dist/investigation/runtime.js");
+  await assert.rejects(readInvestigationProject({ getProject: () => new Promise(() => {}) } as never, "p", 10), /REPOSITORY_API_TIMEOUT/);
+  const server = createServer((_req, _res) => {});
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const api = gitBeakerApiFactory.create(`http://127.0.0.1:${address.port}`, "fixture", { queryTimeout: 20 });
+  await assert.rejects(api.getProject!("p"), /timeout/i);
+});
+
+test("cross-origin GitLab redirects do not forward PAT or OAuth credentials", async (t) => {
+  const received: Record<string, string | string[] | undefined>[] = [];
+  const target = createServer((req, res) => {
+    received.push(req.headers); res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ id: 1, namespace: { id: 1, full_path: "g" }, name: "p", path_with_namespace: "g/p", default_branch: "main", web_url: "http://git.example/g/p" }));
+  });
+  target.listen(0, "127.0.0.1"); await once(target, "listening");
+  const address = target.address(); assert.ok(address && typeof address !== "string");
+  const origin = createServer((_req, res) => { res.writeHead(302, { location: `http://127.0.0.1:${address.port}/project` }); res.end(); });
+  origin.listen(0, "127.0.0.1"); await once(origin, "listening");
+  t.after(() => { origin.closeAllConnections(); target.closeAllConnections(); origin.close(); target.close(); });
+  const source = origin.address(); assert.ok(source && typeof source !== "string");
+  await gitBeakerApiFactory.create(`http://127.0.0.1:${source.port}`, "fixture-token").getProject!("1");
+  assert.equal(received.length, 1);
+  assert.equal(received[0]?.["private-token"], undefined);
+  assert.equal(received[0]?.authorization, undefined);
 });

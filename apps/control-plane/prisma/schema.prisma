@@ -366,6 +366,9 @@ model OutboxMessage {
 }
 
 model GroupWorkspace {
+  repositoryConfigVersion Int @default(0)
+  repositoryConfigManaged Boolean @default(false)
+  repositoryGroups WorkspaceRepositoryGroup[]
   automationEnabled Boolean                @default(true)
   id            String          @id @default(uuid()) @db.Uuid
   groupId       String          @unique @db.Uuid
@@ -383,7 +386,22 @@ model GroupWorkspace {
   tasks         InvestigationTask[]
 }
 
+model WorkspaceRepositoryGroup {
+  id String @id @default(uuid()) @db.Uuid
+  workspaceId String @db.Uuid
+  externalGroupId String
+  fullPath String
+  positionX Int @default(80)
+  positionY Int @default(80)
+  workspace GroupWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repositories WorkspaceRepository[]
+  @@unique([workspaceId, externalGroupId])
+}
+
 model WorkspaceRepository {
+  investigationBranch String @default("main")
+  repositoryGroupId String? @db.Uuid
+  repositoryGroup WorkspaceRepositoryGroup? @relation(fields: [repositoryGroupId], references: [id], onDelete: SetNull)
   workspaceId String         @db.Uuid
   projectId   String         @db.Uuid
   active      Boolean        @default(true)

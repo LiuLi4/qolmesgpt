@@ -101,3 +101,45 @@ test("investigation input preserves causal logs after repetitive completion reco
   const firstRequest = payload.filter((r) => r.requestKey === "trace:trace-0");
   assert.deepEqual(firstRequest.map((r) => r.log.msg), ["金融商响应异常 C0001", "finance user-auth 上游异常", "request completed"]);
 });
+
+
+test("actual repository versions and incomplete evidence are server generated and survive model output", async () => {
+  let ask = "";
+  const versions = [{ projectId: "allowed", projectPath: "g/api", branch: "dev", commitSha: "a".repeat(40), readAt: new Date().toISOString(), status: "READ" as const }, { projectId: "failed", projectPath: "other/api", branch: "staging", commitSha: null, readAt: new Date().toISOString(), status: "FAILED" as const, errorCode: "REPOSITORY_READ_FAILED" }];
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async (_url, init) => {
+    ask = JSON.parse(String(init?.body)).ask;
+    return new Response(JSON.stringify({ analysis: { summary: "s", rootCause: "r", codeContext: [], proposedFix: "p", confidence: "low", affectedProjectIds: ["allowed", "failed", "invented"] } }));
+  });
+  const result = await client.investigate({ ...job, repositoryVersions: versions });
+  assert.deepEqual(result.evidence?.repositoryVersions, versions);
+  assert.equal(result.evidence?.codeEvidenceIncomplete, true);
+  assert.match(result.evidence?.versionNotice ?? "", /当前按所选分支分析/);
+  assert.match(ask, /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/);
+  assert.deepEqual(result.affectedProjectIds, ["allowed"]);
+});
+
+test("model-facing repository provenance is bounded while full versions remain in task evidence", async () => {
+  let requestBytes = 0;
+  const versions = Array.from({ length: 100_000 }, (_, index) => ({
+    projectId: `project-${index}`, projectPath: `group/project-${index}`, branch: "dev", commitSha: null,
+    readAt: new Date().toISOString(), status: "FAILED" as const, errorCode: "REPOSITORY_BUDGET_EXCEEDED",
+  }));
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async (_url, init) => {
+    requestBytes = Buffer.byteLength(String(init?.body));
+    const ask = JSON.parse(String(init?.body)).ask as string;
+    assert.match(ask, /omittedRepositoryVersions/);
+    assert.match(ask, /100000/);
+    return new Response(JSON.stringify({ analysis: { summary: "s", rootCause: "r", proposedFix: "p", codeContext: [], confidence: "low", affectedProjectIds: [] } }));
+  });
+  const result = await client.investigate({ ...job, repositoryVersions: versions });
+  assert.equal(result.evidence?.repositoryVersions?.length, 100_000);
+  assert.ok(requestBytes < 500_000, `model request unexpectedly large: ${requestBytes}`);
+});
+
+
+test("legacy project investigations preserve model attribution without fabricated version records", async () => {
+  const client = new HttpHolmesClient("https://holmes.example.test", undefined, async () => new Response(JSON.stringify({ analysis: { summary: "s", rootCause: "r", proposedFix: "p", codeContext: ["handler.ts:1"], confidence: "low", affectedProjectIds: [job.projectId] } })));
+  const result = await client.investigate(job);
+  assert.deepEqual(result.affectedProjectIds, [job.projectId]);
+  assert.equal(result.evidence?.repositoryVersions, undefined);
+});

@@ -32,3 +32,7 @@ export { WorkspaceAutomationService } from "./workspace/automation.js";
 
 export { packInvestigationEvidence, prioritizeEvidence } from "./investigation/evidence.js";
 export type { EvidenceSummary } from "./investigation/evidence.js";
+
+export { WorkspaceRepositoryService } from "./workspace/repositories.js";
+
+export type { RepositoryVersion } from "./investigation/repositories.js";

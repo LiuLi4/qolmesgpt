@@ -7,9 +7,13 @@ export class PrismaApprovalStore implements ApprovalStore {
   async findTask(taskId: string): Promise<ApprovalTask | null> {
     const task = await this.prisma.investigationTask.findUnique({
       where: { id: taskId },
-      select: { id: true, projectId: true, status: true, project: { select: { groupId: true, connectionId: true } } },
+      select: { id: true, projectId: true, status: true, workspaceId: true, project: { select: { pathWithNamespace: true, groupId: true, connectionId: true } } },
     });
     if (!task || !task.project || !task.projectId) return null;
+    if (task.workspaceId) {
+      const scope = await this.prisma.groupWorkspace.findUnique({ where: { id: task.workspaceId }, select: { group: { select: { fullPath: true } } } });
+      if (!scope || !task.project.pathWithNamespace.startsWith(scope.group.fullPath + "/")) return null;
+    }
     return { taskId: task.id, projectId: task.projectId, groupId: task.project.groupId, gitLabConnectionId: task.project.connectionId, status: task.status as ApprovalTask["status"] };
   }
 

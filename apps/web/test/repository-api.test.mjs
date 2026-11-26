@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {once} from 'node:events';
+import {isolatedDatabase} from '../../control-plane/test/database-fixture.ts';
+
+test('workspace HTTP API forwards pagination, persists configuration, and rejects malformed or unauthorized saves', {skip:!process.env.DATABASE_URL}, async(t)=>{
+ const db=await isolatedDatabase(process.env.DATABASE_URL);const oldUrl=process.env.DATABASE_URL;process.env.DATABASE_URL=db.connectionString;process.env.PORT='0';
+ const {getWebRuntime}=await import('../dist/control-plane.js');const runtime=await getWebRuntime();
+ runtime.prisma=db.prisma;runtime.userId=(await db.prisma.user.create({data:{authSubject:'http-fixture-user'}})).id;
+ const connection=await runtime.prisma.gitLabConnection.create({data:{userId:runtime.userId,instanceUrl:'http://git.example',authType:'PAT',accessTokenCiphertext:'fixture',credentialKeyVersion:'v1'}});
+ const group=await runtime.prisma.gitLabGroup.create({data:{connectionId:connection.id,externalGroupId:'g',fullPath:'group'}});
+ const workspace=await runtime.prisma.groupWorkspace.create({data:{groupId:group.id,relativePath:'w',status:'READY',automationEnabled:false}});
+ let groupPage=0,catalogPage=0,branchPage=0;
+ runtime.gitlab.listGroups=async(_u,_c,page)=>{groupPage=page;return {items:[],nextPage:null,nextCursor:null}};
+ runtime.gitlab.getGroup=async()=>({id:'g',fullPath:'group',name:'group',role:'DEVELOPER',roleCheckedAt:null});
+ const project={id:'p',groupId:'g',name:'api',pathWithNamespace:'group/api',defaultBranch:'main',webUrl:'http://git.example/group/api',remoteUrl:'http://git.example/group/api.git'};
+ runtime.gitlab.listWorkspaceProjects=async()=>[project];
+ runtime.gitlab.listProjects=async(_u,_c,_g,page)=>{catalogPage=page;return {items:[project],nextPage:null,nextCursor:null}};
+ runtime.gitlab.listBranches=async(_u,_c,_p,page)=>{branchPage=page;return {items:[{name:'main',commitSha:'a'.repeat(40)}],nextPage:null,nextCursor:null}};
+ runtime.gitlab.getBranch=async(_u,_c,_p,branch)=>({name:branch,commitSha:'a'.repeat(40)});
+ const {server}=await import('../dist/index.js');if(!server.listening)await once(server,'listening');const port=server.address().port;const base=`http://127.0.0.1:${port}`;
+ t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await runtime.close();await db.close();process.env.DATABASE_URL=oldUrl});
+ assert.equal((await fetch(`${base}/api/gitlab/connections/${connection.id}/groups?page=2`)).status,200);assert.equal(groupPage,2);
+ const endpoint=`${base}/api/workspaces/${workspace.id}`;
+ assert.equal((await fetch(endpoint+'/repository-catalog?groupId=g&page=3')).status,200);assert.equal(catalogPage,3);
+ assert.equal((await fetch(endpoint+'/repository-branches?projectId=p&page=4')).status,200);assert.equal(branchPage,4);
+ const put=(id,body)=>fetch(`${base}/api/workspaces/${id}/repository-groups`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ const config={expectedVersion:0,nodes:[{externalGroupId:'g',x:80,y:80,repositories:[{externalProjectId:'p',branch:'main'}]}]};
+ assert.equal((await put(workspace.id,config)).status,200);
+ assert.equal((await (await fetch(endpoint+'/repository-groups')).json()).nodes[0].repositories[0].branch,'main');
+ assert.equal((await put(workspace.id,{nodes:'invalid'})).status,400);
+ assert.equal((await put('00000000-0000-0000-0000-000000000000',config)).status,404);
+ assert.equal((await runtime.prisma.groupWorkspace.findUniqueOrThrow({where:{id:workspace.id}})).automationEnabled,false);
+});

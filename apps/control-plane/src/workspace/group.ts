@@ -84,9 +84,11 @@ export class GroupWorkspaceService {
       include: { group: { include: { connection: { select: { instanceUrl: true } } } } },
     });
     if (!workspace) throw new Error("Group Workspace is unavailable");
+    // Manual cross-Group selections and investigation branches belong to the designer.
+    if (workspace.repositoryConfigManaged) return;
     const owner = randomUUID();
     const claim = await this.prisma.groupWorkspace.updateMany({
-      where: { id: workspaceId, OR: [{ syncOwner: null }, { syncExpiresAt: { lt: new Date() } }] },
+      where: { id: workspaceId, repositoryConfigManaged: false, repositoryConfigVersion: workspace.repositoryConfigVersion ?? 0, OR: [{ syncOwner: null }, { syncExpiresAt: { lt: new Date() } }] },
       data: { status: "INITIALIZING", syncOwner: owner, syncExpiresAt: new Date(Date.now() + 300_000), errorMessage: null },
     });
     if (!claim.count) throw new Error("Workspace synchronization is already running");
@@ -95,26 +97,37 @@ export class GroupWorkspaceService {
       const group = await this.gitlab.getGroup(userId, workspace.group.connectionId, workspace.group.externalGroupId);
       const token = await this.gitlab.getAccessToken(userId, workspace.group.connectionId);
       const discovered = await this.gitlab.listWorkspaceProjects(userId, workspace.group.connectionId, workspace.group.externalGroupId);
-      const members: { id: string; remoteUrl: string; branch: string }[] = [];
-      for (const repository of discovered) {
-        if (!repository.pathWithNamespace.startsWith(`${group.fullPath}/`)) throw new Error("GitLab returned a repository outside the selected Group");
-        const remoteUrl = repository.remoteUrl ?? `${repository.webUrl.replace(/\/$/, "")}.git`;
-        const url = new URL(remoteUrl);
-        if (url.origin !== new URL(workspace.group.connection.instanceUrl).origin || url.username || url.password || url.search || url.hash) throw new Error("GitLab repository origin must match its connection");
-        const namespace = await this.prisma.gitLabGroup.upsert({
-          where: { connectionId_externalGroupId: { connectionId: workspace.group.connectionId, externalGroupId: repository.groupId } },
-          create: { connectionId: workspace.group.connectionId, externalGroupId: repository.groupId, fullPath: repository.namespacePath ?? repository.pathWithNamespace.split("/").slice(0, -1).join("/") },
-          update: {},
+      // Lock the Workspace row before any membership writes. A manual save may retire
+      // an expired lease while discovery is in flight; its version must win atomically.
+      const members = await this.prisma.$transaction(async (tx) => {
+        const fenced = await tx.groupWorkspace.updateMany({
+          where: { id: workspaceId, syncOwner: owner, syncExpiresAt: { gt: new Date() }, repositoryConfigManaged: false, repositoryConfigVersion: workspace.repositoryConfigVersion ?? 0 },
+          data: { syncExpiresAt: new Date(Date.now() + 300_000) },
         });
-        const project = await this.prisma.project.upsert({
-          where: { connectionId_externalProjectId: { connectionId: workspace.group.connectionId, externalProjectId: repository.id } },
-          create: { connectionId: workspace.group.connectionId, groupId: namespace.id, externalProjectId: repository.id, pathWithNamespace: repository.pathWithNamespace, defaultBranch: repository.defaultBranch, createdByUserId: userId },
-          update: { groupId: namespace.id, pathWithNamespace: repository.pathWithNamespace, defaultBranch: repository.defaultBranch },
-        });
-        await this.prisma.workspaceRepository.upsert({ where: { workspaceId_projectId: { workspaceId, projectId: project.id } }, create: { workspaceId, projectId: project.id }, update: { active: true } });
-        members.push({ id: project.id, remoteUrl, branch: repository.defaultBranch });
-      }
-      await this.prisma.workspaceRepository.updateMany({ where: { workspaceId, projectId: { notIn: members.map((member) => member.id) } }, data: { active: false } });
+        if (!fenced.count) throw new Error("Workspace synchronization lease lost");
+        const repositoryNode = tx.workspaceRepositoryGroup ? await tx.workspaceRepositoryGroup.upsert({ where: { workspaceId_externalGroupId: { workspaceId, externalGroupId: group.id } }, create: { workspaceId, externalGroupId: group.id, fullPath: group.fullPath }, update: { fullPath: group.fullPath } }) : null;
+        const members: { id: string; remoteUrl: string; branch: string }[] = [];
+        for (const repository of discovered) {
+          if (!repository.pathWithNamespace.startsWith(`${group.fullPath}/`)) throw new Error("GitLab returned a repository outside the selected Group");
+          const remoteUrl = repository.remoteUrl ?? `${repository.webUrl.replace(/\/$/, "")}.git`;
+          const url = new URL(remoteUrl);
+          if (url.origin !== new URL(workspace.group.connection.instanceUrl).origin || url.username || url.password || url.search || url.hash) throw new Error("GitLab repository origin must match its connection");
+          const namespace = await tx.gitLabGroup.upsert({
+            where: { connectionId_externalGroupId: { connectionId: workspace.group.connectionId, externalGroupId: repository.groupId } },
+            create: { connectionId: workspace.group.connectionId, externalGroupId: repository.groupId, fullPath: repository.namespacePath ?? repository.pathWithNamespace.split("/").slice(0, -1).join("/") },
+            update: {},
+          });
+          const project = await tx.project.upsert({
+            where: { connectionId_externalProjectId: { connectionId: workspace.group.connectionId, externalProjectId: repository.id } },
+            create: { connectionId: workspace.group.connectionId, groupId: namespace.id, externalProjectId: repository.id, pathWithNamespace: repository.pathWithNamespace, defaultBranch: repository.defaultBranch, createdByUserId: userId },
+            update: { groupId: namespace.id, pathWithNamespace: repository.pathWithNamespace, defaultBranch: repository.defaultBranch },
+          });
+          await tx.workspaceRepository.upsert({ where: { workspaceId_projectId: { workspaceId, projectId: project.id } }, create: { workspaceId, projectId: project.id, investigationBranch: repository.defaultBranch, repositoryGroupId: repositoryNode?.id }, update: { active: true } });
+          members.push({ id: project.id, remoteUrl, branch: repository.defaultBranch });
+        }
+        await tx.workspaceRepository.updateMany({ where: { workspaceId, projectId: { notIn: members.map((member) => member.id) } }, data: { active: false } });
+        return members;
+      }, { timeout: 30_000 });
       for (const member of members) {
         const renewed = await this.prisma.groupWorkspace.updateMany({ where: { id: workspaceId, syncOwner: owner, syncExpiresAt: { gt: new Date() } }, data: { syncExpiresAt: new Date(Date.now() + 300_000) } });
         if (!renewed.count) throw new Error("Workspace synchronization lease lost");

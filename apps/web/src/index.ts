@@ -1,3 +1,4 @@
+import { WorkspaceRepositoryService } from "@qolmesgpt/control-plane";
 import { WorkspaceAutomationService } from "@qolmesgpt/control-plane";
 import { PrismaInvestigationStore } from "@qolmesgpt/control-plane";
 import { backfillSls, AliyunSlsConsumerProtocol } from "@qolmesgpt/workers";
@@ -129,6 +130,7 @@ async function statePayload(workspaceId?: string) {
     })),
     workspaces: groupWorkspaces.map((workspace) => ({
       id: workspace.id,
+      connectionId: workspace.group.connectionId,
       group: workspace.group.fullPath,
       automationEnabled: workspace.automationEnabled,
       status: workspace.status,
@@ -222,6 +224,19 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (req.method === "GET" && url.pathname === "/api/state") {
       sendJson(res, 200, await statePayload(url.searchParams.get("workspaceId") || undefined));
       return;
+    }
+    const repositoryPath = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/(repository-groups|repository-catalog|repository-branches)$/);
+    if (repositoryPath) {
+      const runtime = await getWebRuntime();
+      const service = new WorkspaceRepositoryService(runtime.prisma, runtime.gitlab);
+      const id = decodeURIComponent(repositoryPath[1]!);
+      if (req.method === "GET" && repositoryPath[2] === "repository-groups") { sendJson(res, 200, await service.get(runtime.userId, id)); return; }
+      if (req.method === "PUT" && repositoryPath[2] === "repository-groups") {
+        const body = await readBody(req);
+        sendJson(res, 200, await service.save(runtime.userId, id, body as unknown as Parameters<WorkspaceRepositoryService["save"]>[2])); return;
+      }
+      if (req.method === "GET" && repositoryPath[2] === "repository-catalog") { sendJson(res, 200, await service.catalog(runtime.userId, id, url.searchParams.get("groupId") ?? "", Number(url.searchParams.get("page") ?? 1))); return; }
+      if (req.method === "GET" && repositoryPath[2] === "repository-branches") { sendJson(res, 200, await service.branches(runtime.userId, id, url.searchParams.get("projectId") ?? "", Number(url.searchParams.get("page") ?? 1))); return; }
     }
     const automationPath = req.method === "POST" && url.pathname.match(/^\/api\/workspaces\/([^/]+)\/automation$/);
     if (automationPath) {
@@ -371,7 +386,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const groupsPath = url.pathname.match(/^\/api\/gitlab\/connections\/([^/]+)\/groups$/);
     if (req.method === "GET" && groupsPath) {
       const runtime = await getWebRuntime();
-      sendJson(res, 200, await runtime.gitlab.listGroups(runtime.userId, decodeURIComponent(groupsPath[1])));
+      sendJson(res, 200, await runtime.gitlab.listGroups(runtime.userId, decodeURIComponent(groupsPath[1]), Math.max(1, Number(url.searchParams.get("page") ?? 1))));
       return;
     }
     const projectsPath = url.pathname.match(/^\/api\/gitlab\/connections\/([^/]+)\/groups\/([^/]+)\/projects$/);

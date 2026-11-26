@@ -448,14 +448,14 @@ class AliyunSLSTraceContext(_BaseAliyunSLSTool):
             clauses.append(_quoted_field("traceId", params["trace_id"]))
         if params.get("request_id"):
             clauses.append(_quoted_field("requestId", params["request_id"]))
-        if params.get("service"):
-            clauses.append(_quoted_field("service", params["service"]))
         if not clauses:
             return StructuredToolResult(
                 status=StructuredToolResultStatus.ERROR,
                 error="Provide at least one of trace_id or request_id.",
                 params=params,
             )
+        if params.get("service"):
+            clauses.append(_quoted_field("service", params["service"]))
         return self._invoke_query(params, " AND ".join(clauses))
 
     def get_parameterized_one_liner(self, params: Dict) -> str:

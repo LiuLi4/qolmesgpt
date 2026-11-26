@@ -6,13 +6,14 @@ import { AliyunSlsAdapter } from "../integrations/sls/adapter.js";
 import { packInvestigationEvidence, prioritizeEvidence, requestKey, evidenceFields, completionLog } from "./evidence.js";
 import { logFields } from "../detection/aggregation.js";
 import { evidence, type PrismaSlsDetectionStore } from "../detection/prisma.js";
+import type { RepositorySnapshot, RepositoryVersion } from "./repositories.js";
 import type { InvestigationJob } from "./prisma.js";
 
 const exec = promisify(execFile);
 function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
 /** Read-only, bounded evidence collection. Never executes text from logs or model output. */
-export async function prepareInvestigation(job: InvestigationJob, sources: PrismaSlsDetectionStore, root: string, adapter = new AliyunSlsAdapter()): Promise<InvestigationJob & { codeEvidence: string[] }> {
+export async function prepareInvestigation(job: InvestigationJob, sources: PrismaSlsDetectionStore, root: string, adapter = new AliyunSlsAdapter(), openSnapshot?: (repo: NonNullable<InvestigationJob["repositories"]>[number]) => Promise<RepositorySnapshot>): Promise<InvestigationJob & { codeEvidence: string[]; repositoryVersions?: RepositoryVersion[] }> {
   const started = Date.now();
   const relatedLogs: unknown[] = [...job.relatedLogs];
   const diagnostics: string[] = [];
@@ -53,9 +54,27 @@ export async function prepareInvestigation(job: InvestigationJob, sources: Prism
   for (const match of text.matchAll(/\b(?:[A-Z][A-Za-z]+(?:Error|Exception)|E[A-Z_]{4,30})\b/g)) terms.add(match[0]);
   for (const value of [fields.component, fields.service, object(fields.err).type, object(fields.error).name]) if (typeof value === "string" && /^[A-Za-z][A-Za-z0-9_.-]{3,79}$/.test(value)) terms.add(value);
   const codeEvidence: string[] = [];
+  const repositoryVersions: RepositoryVersion[] = [];
   const rootPath = await realpath(root).catch(() => null);
   if (!rootPath) diagnostics.push("Workspace checkout root unavailable; code locations not collected");
   for (const repo of (job.repositories ?? [{ id: job.projectId ?? "", projectPath: job.projectPath, workspacePath: job.workspacePath }]).slice(0, 30)) {
+    if (openSnapshot && job.workspaceId) {
+      let snapshot: RepositorySnapshot | undefined;
+      try {
+        if (Date.now() - started > 70_000) throw new Error("REPOSITORY_BUDGET_EXCEEDED");
+        snapshot = await openSnapshot(repo);
+        const locations = await snapshot.search([...terms]);
+        repositoryVersions.push(snapshot.version);
+        codeEvidence.push(`Repository ${repo.id} (${repo.projectPath}); selected branch ${snapshot.version.branch}; actual commit ${snapshot.version.commitSha}; matching source locations (source text withheld): ${JSON.stringify(locations)}`);
+      } catch (error) {
+        // Only fixed internal classifications may reach prompts/UI; provider messages can contain secrets.
+        const allowed = ["REPOSITORY_CONFIGURATION_MISSING", "REPOSITORY_ACCESS_UNAVAILABLE", "REPOSITORY_IDENTITY_CHANGED", "REPOSITORY_API_TIMEOUT", "REPOSITORY_SNAPSHOT_TIMEOUT", "REPOSITORY_FETCH_FAILED", "REPOSITORY_SEARCH_FAILED", "REPOSITORY_BUDGET_EXCEEDED", "INVALID_INVESTIGATION_BRANCH", "INVALID_REPOSITORY_ORIGIN", "INVALID_REPOSITORY_COMMIT"];
+        const errorCode = error instanceof Error && allowed.includes(error.message) ? error.message : "REPOSITORY_READ_FAILED";
+        repositoryVersions.push({ projectId: repo.id, projectPath: repo.projectPath, branch: repo.branch ?? "", commitSha: null, readAt: new Date().toISOString(), status: "FAILED", errorCode });
+        diagnostics.push(`${repo.projectPath}: ${errorCode}; selected branch could not be read; no cache/default fallback; evidence incomplete`);
+      } finally { await snapshot?.close(); }
+      continue;
+    }
     if (!repo.workspacePath || !rootPath) continue;
     if (Date.now() - started > 35_000) { diagnostics.push("Code context collection time budget reached"); break; }
     try {
@@ -72,8 +91,9 @@ export async function prepareInvestigation(job: InvestigationJob, sources: Prism
       if (codeEvidence.join("").length > 35_000) break;
     } catch { diagnostics.push(`${repo.projectPath}: code checkout unavailable or search failed`); }
   }
+  if (openSnapshot && job.workspaceId) for (const repo of (job.repositories ?? []).slice(30)) repositoryVersions.push({ projectId: repo.id, projectPath: repo.projectPath, branch: repo.branch ?? "", commitSha: null, readAt: new Date().toISOString(), status: "FAILED", errorCode: "REPOSITORY_BUDGET_EXCEEDED" });
   // Both loops are bounded: at most 6 requests * 10 sources * 100 records plus 200 stored events.
   // Leave the final budget decision to the shared packer so no intermediate slice silently drops evidence.
   relatedLogs.unshift({ contextDiagnostics: diagnostics, sampledRequests: requests.length, note: "Context is bounded; empty results do not prove absence of errors." });
-  return { ...job, relatedLogs: relatedLogs as InvestigationJob["relatedLogs"], codeEvidence };
+  return { ...job, relatedLogs: relatedLogs as InvestigationJob["relatedLogs"], codeEvidence, ...(openSnapshot && job.workspaceId ? { repositoryVersions } : {}) };
 }
