@@ -11,6 +11,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
   let stateCalls = 0;
   const elements = new Map();
   let taskCards = [];
+  let sourceButtons = [];
   let taskDetailCalls = 0;
   let focused;
   function element(id, dataset = {}) {
@@ -30,6 +31,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
       set innerHTML(value) {
         html = value;
         if (["active-workspace", "sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? "";
+        if (id === "workspace-source-list") sourceButtons = [...value.matchAll(/data-workspace-source="([^"]+)"/g)].map(([, source]) => element(`source-${source}`, { workspaceSource: source }));
         if (id === "task-list") taskCards = [...value.matchAll(/<article[^>]*data-task="([^"]+)"/g)].map(([, task]) => element(`card-${task}`, { task }));
         if (id === "workspace-choices") workspaceChoices = [...value.matchAll(/<button class="workspace-choice" data-workspace-choice="([^"]+)" aria-current="([^"]+)">/g)].map(([, workspaceId, selected]) => element(`workspace-choice-${workspaceId}`, { workspaceChoice: workspaceId, selected }));
       },
@@ -54,6 +56,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
       if (selector === ".view") return nav.map((item) => elements.get(item.dataset.view)).filter(Boolean);
       if (selector === "#task-list [data-task]") return taskCards;
       if (selector === "[data-workspace-choice]") return workspaceChoices;
+      if (selector === "[data-workspace-source]") return sourceButtons;
       if (selector === "[data-task]") return [...taskCards, ...(elements.get("task-detail").dataset.task ? [elements.get("task-detail")] : [])];
       return [];
     },
@@ -84,7 +87,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
   });
   await setImmediate();
   return { elements, location, slsRequests, get stateCalls() { return stateCalls; }, get storage() { return storage; }, get workspaceChoices() { return workspaceChoices; },
-    get taskCards() { return taskCards; }, get taskDetailCalls() { return taskDetailCalls; },
+    get sourceButtons() { return sourceButtons; }, get taskCards() { return taskCards; }, get taskDetailCalls() { return taskDetailCalls; },
     update(next) { state = { ...state, ...next }; },
     async tick() { intervals.forEach((callback) => callback()); await setImmediate(); },
     get focused() { return focused; }, get createCalls() { return createCalls; },
@@ -275,13 +278,16 @@ test("task detail stays closed after polling and can be reopened without dialog 
   }
 });
 
-test("workspace and log source selectors share the top context and show live log details", () => {
-  assert.match(page, /class="workspace-context"/);
-  assert.match(page, /id="active-workspace" aria-label="切换 Workspace"/);
-  assert.match(page, /id="source-switcher"/);
-  assert.match(page, /id="monitor-source" aria-label="切换日志数据源"/);
-  assert.match(page, /当前日志实时详情/);
-  assert.match(page, /原始日志保留在阿里云 SLS；错误日志与调查结果保存到系统数据库/);
+test("log sources are the final Workspace tab and the monitor is outside the global topbar", () => {
+  const topbar = page.slice(page.indexOf('<div class="topbar">'), page.indexOf('<section class="view active"'));
+  assert.doesNotMatch(topbar, /monitor-source|<label[^>]*>日志数据源/);
+  const tabs = page.slice(page.indexOf('id="workspace-tabs"'), page.indexOf('id="workspace-designer"'));
+  assert.match(tabs, /workspace-tab-tasks[\s\S]*workspace-tab-designer[\s\S]*workspace-tab-sources/);
+  const sources = page.slice(page.indexOf('<section id="workspace-sources"'), page.indexOf('<div id="workspace-activity"'));
+  assert.match(sources, /id="workspace-add-source"/);
+  assert.match(sources, /id="monitor-source" aria-label="切换日志数据源"/);
+  assert.match(sources, /当前日志实时详情/);
+  assert.match(sources, /原始日志保留在阿里云 SLS；错误日志与调查结果保存到系统数据库/);
 });
 
 
@@ -341,4 +347,87 @@ test("new Workspace opens an inline right-side creation page and closes back to 
  ui.elements.get("close-workspace-setup").click();
  assert.equal(ui.elements.get("workspace-create-page").hidden,true);
  assert.equal(ui.elements.get("workspace-activity").hidden,false);
+});
+
+
+test("Workspace source tab scopes multiple sources, switches live details and edits only the selected source", async () => {
+  const first = { ...source(), recentLogs: [{ msg: "first-source-log" }] };
+  const second = { ...source(), id: "source-2", project: "second-project", logstore: "second-store", recentLogs: [{ msg: "second-source-log" }] };
+  const foreign = { ...source(), id: "foreign", workspaceId: "other", project: "foreign-project" };
+  const ui = await openPage([workspace("ready"), workspace("other")], [first, second, foreign]);
+  ui.elements.get("workspace-tab-sources").click();
+  assert.equal(ui.elements.get("workspace-sources").hidden, false);
+  assert.equal(ui.elements.get("workspace-activity").hidden, true);
+  assert.equal(ui.elements.get("workspace-designer").hidden, true);
+  assert.equal(ui.elements.get("workspace-tab-sources")["aria-selected"], "true");
+  assert.equal(ui.sourceButtons.length, 2);
+  assert.doesNotMatch(ui.elements.get("workspace-source-list").innerHTML, /foreign-project/);
+  ui.elements.get("monitor-source").change("source-2");
+  assert.match(ui.elements.get("workspace-monitor").innerHTML, /second-project/);
+  assert.match(ui.elements.get("recent-logs").innerHTML, /second-source-log/);
+  assert.doesNotMatch(ui.elements.get("recent-logs").innerHTML, /first-source-log/);
+  ui.sourceButtons[1].click();
+  assert.equal(ui.location.hash, "#sources");
+  assert.equal(ui.elements.get("sls-project").value, "second-project");
+  ui.elements.get("sls-logstore").input("edited-store");
+  ui.elements.get("save-sls").click();
+  assert.equal(ui.slsRequests[0].sourceId, "source-2");
+  assert.equal(ui.slsRequests[0].workspaceId, "ready");
+  ui.completeSls({ ok: true, connection: { id: second.id }, message: "saved" }, [first, { ...second, logstore: "edited-store" }, foreign]);
+  await setImmediate();
+  assert.equal(ui.location.hash, "#projects");
+  assert.equal(ui.elements.get("workspace-sources").hidden, false);
+  assert.match(ui.elements.get("workspace-source-list").innerHTML, /custom-logstore/);
+  assert.match(ui.elements.get("workspace-source-list").innerHTML, /edited-store/);
+  ui.workspaceChoices[1].click();
+  await setImmediate();
+  assert.equal(ui.sourceButtons.length, 1);
+  assert.match(ui.elements.get("workspace-source-list").innerHTML, /foreign-project/);
+  assert.doesNotMatch(ui.elements.get("workspace-source-list").innerHTML, /second-project/);
+  assert.equal(ui.elements.get("monitor-source").value, "foreign");
+});
+
+test("adding a Workspace source omits sourceId and retains existing sources after save", async () => {
+  const existing = source();
+  const ui = await openPage([workspace("ready")], [existing]);
+  ui.elements.get("workspace-tab-sources").click();
+  ui.elements.get("workspace-add-source").click();
+  assert.equal(ui.elements.get("sls-workspace-id").value, "ready");
+  assert.equal(ui.elements.get("sls-access-key-secret").value, "");
+  assert.equal(ui.elements.get("save-sls").disabled, false);
+  ui.elements.get("sls-project").input("new-project");
+  ui.elements.get("sls-logstore").input("new-store");
+  ui.elements.get("save-sls").click();
+  assert.equal(ui.slsRequests.length, 1);
+  assert.equal(Object.hasOwn(ui.slsRequests[0], "sourceId"), false);
+  assert.equal(ui.slsRequests[0].workspaceId, "ready");
+  const added = { ...source(), id: "added", project: "new-project", logstore: "new-store" };
+  ui.completeSls({ ok: true, connection: { id: added.id }, message: "saved" }, [existing, added]);
+  await setImmediate();
+  assert.equal(ui.location.hash, "#projects");
+  assert.equal(ui.elements.get("workspace-sources").hidden, false);
+  assert.equal(ui.sourceButtons.length, 2);
+  assert.equal(existing.logstore, "custom-logstore");
+  assert.equal(ui.elements.get("sls-logstore").value, "new-store");
+});
+
+test("source tab restores after cancelling inline creation and configuration, and unavailable workspaces cannot add sources", async () => {
+  const ui = await openPage([workspace("ready"), workspace("failed", "FAILED")], [source()]);
+  ui.elements.get("workspace-tab-sources").click();
+  ui.elements.get("rail-new-workspace").click();
+  assert.equal(ui.elements.get("workspace-sources").hidden, true);
+  ui.elements.get("close-workspace-setup").click();
+  assert.equal(ui.elements.get("workspace-sources").hidden, false);
+  assert.equal(ui.elements.get("workspace-activity").hidden, true);
+  ui.elements.get("workspace-add-source").click();
+  ui.elements.get("sls-logstore").input("discarded");
+  ui.elements.get("back-workspace-sources").click();
+  assert.equal(ui.location.hash, "#projects");
+  assert.equal(ui.elements.get("workspace-sources").hidden, false);
+  assert.equal(ui.slsRequests.length, 0);
+  ui.workspaceChoices[1].click();
+  await setImmediate();
+  assert.equal(ui.elements.get("workspace-add-source").disabled, true);
+  ui.elements.get("workspace-add-source").click();
+  assert.equal(ui.location.hash, "#projects");
 });
