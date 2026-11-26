@@ -328,7 +328,9 @@
 
 ### DEC-014: Group Workspace 和独立仓库 checkout
 
-- **Status**: confirmed
+- **Status**: superseded
+- **Replaced By**: [Workspace 多仓库调查分支需求](../2026-1126-workspace-repository-branches/requirements.md) 的 NEED-001 至 NEED-003、CON-003。
+- **Historical Note**: 仓库仅限原 Group 及子 Group 的限制由跨 Group 调查范围替代；Group Workspace 创建、原有自动纳入行为和仓库独立 checkout 等未冲突约定继续适用。新增调查范围不扩展修复或审批权限。
 - **Decision**: 以 GitLab Group 创建/复用 Workspace，递归分页获取全部可访问项目（不包含仅分享给 Group 的外部项目）。维护 Workspace 与项目的关联；SLS 配置只关联 Workspace。保留仓库级 checkout 供只读调查和审批后修复。
 - **Alternatives Rejected**: 日志源绑定单个项目；仅包含直属项目；将多个仓库合并为一个 Git 仓库。
 - **Reason**: 一个 SLS 日志收集器覆盖整个 Group 的项目，单项目模型不能准确表达调查范围。
