@@ -31,10 +31,11 @@ async function openPage(workspaces, sources = [], tasks = []) {
         html = value;
         if (["active-workspace", "sls-workspace-id", "gitlab-group"].includes(id)) this.value = /<option value="([^"]*)"/.exec(value)?.[1] ?? "";
         if (id === "task-list") taskCards = [...value.matchAll(/<article[^>]*data-task="([^"]+)"/g)].map(([, task]) => element(`card-${task}`, { task }));
+        if (id === "workspace-choices") workspaceChoices = [...value.matchAll(/<button class="workspace-choice" data-workspace-choice="([^"]+)" aria-current="([^"]+)">/g)].map(([, workspaceId, selected]) => element(`workspace-choice-${workspaceId}`, { workspaceChoice: workspaceId, selected }));
       },
     };
   }
-  for (const [, id] of page.matchAll(/id="([^"]+)"/g)) elements.set(id, element(id));
+  for (const match of page.matchAll(/<[^>]*id="([^"]+)"[^>]*>/g)) { const item=element(match[1]); item.hidden=/\shidden(?:\s|>)/.test(match[0]); elements.set(match[1],item); }
   elements.get("close-task-detail").parent = elements.get("task-detail");
   elements.get("retry-investigation").parent = elements.get("task-detail");
   elements.get("gitlab-auth-method") && (elements.get("gitlab-auth-method").value = "pat");
@@ -44,6 +45,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
   let pendingSls;
   const slsRequests = [];
   let createCalls = 0;
+  let workspaceChoices = [];
   let state = { projects: [], tasks, workspaces, sources };
   const document = {
     getElementById: (id) => elements.get(id),
@@ -51,6 +53,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
       if (selector === ".nav button") return nav;
       if (selector === ".view") return nav.map((item) => elements.get(item.dataset.view)).filter(Boolean);
       if (selector === "#task-list [data-task]") return taskCards;
+      if (selector === "[data-workspace-choice]") return workspaceChoices;
       if (selector === "[data-task]") return [...taskCards, ...(elements.get("task-detail").dataset.task ? [elements.get("task-detail")] : [])];
       return [];
     },
@@ -80,7 +83,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
     },
   });
   await setImmediate();
-  return { elements, location, slsRequests, get stateCalls() { return stateCalls; },
+  return { elements, location, slsRequests, get stateCalls() { return stateCalls; }, get storage() { return storage; }, get workspaceChoices() { return workspaceChoices; },
     get taskCards() { return taskCards; }, get taskDetailCalls() { return taskDetailCalls; },
     update(next) { state = { ...state, ...next }; },
     async tick() { intervals.forEach((callback) => callback()); await setImmediate(); },
@@ -92,7 +95,7 @@ async function openPage(workspaces, sources = [], tasks = []) {
 
 function workspace(id, status = "READY") { return { id, group: `acme/${id}`, relativePath: `groups/${id}`, status, repositories: [{ pathWithNamespace: `acme/${id}/api`, status }], errorMessage: status === "FAILED" ? "1 repository checkout requires attention" : null }; }
 
-test("successful creation reports its result in the dialog and continues to the selected source workspace", async () => {
+test("successful creation is inline and opens the newly selected Workspace detail", async () => {
   const first = workspace("first");
   const second = workspace("second");
   const ui = await openPage([first], [{ workspaceId: first.id, project: "first-logs", logstore: "first-store", endpoint: "https://cn-shanghai.log.aliyuncs.com", status: "ENABLED" }]);
@@ -103,20 +106,18 @@ test("successful creation reports its result in the dialog and continues to the 
   assert.equal(button.disabled, true);
   assert.equal(ui.createCalls, 1);
   // The creation response can precede synchronization; the refreshed state is authoritative.
-  ui.completeCreate({ ...second, status: "INITIALIZING" }, [first, second]);
+  ui.completeCreate({ ...second, status: "READY" }, [first, second]);
   await setImmediate();
-  assert.equal(ui.elements.get("workspace-dialog").open, true);
-  assert.match(ui.elements.get("gitlab-result").textContent, /已就绪/);
-  ui.elements.get("continue-workspace").click();
-  assert.equal(ui.elements.get("workspace-dialog").open, false);
-  assert.equal(ui.location.hash, "#sources");
-  assert.equal(ui.elements.get("sls-workspace-id").value, second.id);
-  assert.equal(ui.elements.get("sls-project").value, "pyxis-telemetry-log");
-  assert.match(ui.elements.get("source-result").textContent, /acme\/second/);
+  assert.equal(ui.elements.get("workspace-create-page").hidden, true);
+  assert.equal(ui.elements.get("workspace-activity").hidden, false);
+  assert.equal(ui.location.hash, "#projects");
+  assert.equal(ui.elements.get("active-workspace").value, second.id);
+  assert.match(ui.elements.get("page-title").textContent, /Workspace 详情/);
+  assert.match(ui.elements.get("workspace-opened-feedback").textContent, /acme\/second/);
   assert.equal(button.disabled, false);
 });
 
-test("failed synchronization stays on projects, reports the failure and restores the create button", async () => {
+test("failed synchronization stays in inline creation and reports the failure", async () => {
   const failed = workspace("failed", "FAILED");
   const ui = await openPage([]);
   const button = ui.elements.get("create-workspace");
@@ -126,18 +127,20 @@ test("failed synchronization stays on projects, reports the failure and restores
   await setImmediate();
   assert.equal(ui.location.hash, "#projects");
   assert.match(ui.elements.get("gitlab-result").textContent, /1 repository checkout requires attention/);
-  assert.equal(ui.elements.get("workspace-dialog").open, true);
+  assert.equal(ui.elements.get("workspace-create-page").hidden, false);
   assert.equal(button.disabled, false);
 });
 
 test("workspace creation is hidden until requested and authentication methods are mutually exclusive", async () => {
   const ui = await openPage([workspace("ready")]);
-  const dialog = ui.elements.get("workspace-dialog");
-  assert.equal(dialog.open, false);
+  const createPage = ui.elements.get("workspace-create-page");
+  assert.equal(createPage.hidden, true);
   assert.match(ui.elements.get("active-workspace").innerHTML, /acme\/ready/);
   assert.equal(ui.elements.get("new-workspace").hidden, false);
   ui.elements.get("new-workspace").click();
-  assert.equal(dialog.open, true);
+  assert.equal(createPage.hidden, false);
+  assert.equal(ui.focused, "workspace-create-title");
+  assert.equal(ui.elements.get("workspace-activity").hidden, true);
   assert.equal(ui.elements.get("gitlab-pat-field").hidden, false);
   ui.elements.get("gitlab-auth-method").change("oauth");
   assert.equal(ui.elements.get("gitlab-pat-field").hidden, true);
@@ -146,8 +149,9 @@ test("workspace creation is hidden until requested and authentication methods ar
   assert.equal(ui.elements.get("gitlab-pat-field").hidden, false);
   assert.equal(ui.elements.get("connect-gitlab").textContent, "使用 PAT 连接");
   ui.elements.get("gitlab-pat").input("fixture-token");
-  ui.elements.get("close-workspace-dialog").click();
-  assert.equal(dialog.open, false);
+  ui.elements.get("close-workspace-setup").click();
+  assert.equal(createPage.hidden, true);
+  assert.equal(ui.elements.get("workspace-activity").hidden, false);
   assert.equal(ui.elements.get("gitlab-pat").value, "");
   assert.equal(ui.focused, "new-workspace");
 });
@@ -312,4 +316,29 @@ test("automation switch reflects persisted pause, controls its workspace and ref
   await setImmediate();
   assert.equal(ui.elements.get("automation-toggle")["aria-checked"], "false");
   assert.match(ui.elements.get("automation-label").textContent, /已暂停/);
+});
+
+
+test("selecting a Workspace opens its right-side detail and gives visible feedback",async()=>{
+ const ui=await openPage([workspace("first"),workspace("second")]);
+ assert.equal(ui.elements.get("workspace-activity").hidden,false);
+ assert.match(ui.elements.get("page-title").textContent,/acme\/first/);
+ ui.workspaceChoices[0].click();
+ assert.match(ui.elements.get("workspace-opened-feedback").textContent,/已打开 Workspace 详情：acme\/first/);
+ ui.workspaceChoices[1].click();
+ assert.equal(ui.elements.get("active-workspace").value,"second");
+ assert.equal(ui.storage.get("qolmesgpt-workspace"),"second");
+ assert.match(ui.elements.get("page-title").textContent,/Workspace 详情 · acme\/second/);
+ assert.match(ui.elements.get("workspace-opened-feedback").textContent,/已打开 Workspace 详情/);
+});
+
+test("new Workspace opens an inline right-side creation page and closes back to selected detail",async()=>{
+ const ui=await openPage([workspace("ready")]);
+ ui.elements.get("rail-new-workspace").click();
+ assert.equal(ui.elements.get("workspace-create-page").hidden,false);
+ assert.equal(ui.elements.get("workspace-dialog"),undefined);
+ assert.equal(ui.elements.get("workspace-activity").hidden,true);
+ ui.elements.get("close-workspace-setup").click();
+ assert.equal(ui.elements.get("workspace-create-page").hidden,true);
+ assert.equal(ui.elements.get("workspace-activity").hidden,false);
 });
