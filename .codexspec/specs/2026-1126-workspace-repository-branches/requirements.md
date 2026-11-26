@@ -10,7 +10,7 @@
 - 只有 `Status: confirmed` 条目是后续规格、设计和实现的绑定输入；待定项不得隐式升级为已确认需求。
 - 本需求扩展现有 Group Workspace 的调查仓库范围，关联既有 [Workspace 需求](../2026-1119-14537g-web-workspace-log-monitoring/requirements.md) 的 NEED-009、CON-006 和 DEC-014。
 - 原先仓库仅限 Workspace 所属 Group 及子 Group 的范围限制由 NEED-001 替代；不取消既有 Workspace、日志数据源绑定、仓库独立性、人工审批或访问控制约束。
-- 本需求仅确认调查使用的仓库、分支和代码版本，不隐含改变既有 Group 自动纳入仓库的行为，也不把跨 Group 调查权限解释为跨 Group 修复权限。
+- 本需求确认调查使用的仓库、分支、代码版本及 Workspace 列表与仓库画布交互，不隐含改变既有 Group 自动纳入仓库的行为，也不把跨 Group 调查权限解释为跨 Group 修复权限。
 
 ## 需求
 
@@ -33,6 +33,34 @@
 - **Status**: confirmed
 - **Statement**: 每次调查读取各仓库所选分支当时的最新提交；在该次调查中固定使用已读取的提交，避免分析过程中混用分支后续变化。调查结论逐仓记录分支、实际读取的完整 commit SHA 和读取状态，能够追溯结论实际依据的代码版本。重新调查时再次读取所选分支最新提交，并记录该次实际读取的 SHA。
 - **User Evidence**: “调查时读取该分支最新代码，并在结论中记录实际读取的 commit SHA”；已确认汇总“该次调查固定使用这份代码，结论逐仓记录分支、实际读取的完整 commit SHA 和读取状态”。
+- **Confirmed At**: 2026-11-26 Asia/Shanghai
+
+### NEED-004：workspaces 菜单与滑出列表
+
+- **Status**: confirmed
+- **Statement**: 将主菜单“项目与 Workspace”重命名为 `workspaces`。点击后，在主菜单右侧滑出已有 Workspace 列表；列表顶部提供新建 Workspace 按钮。
+- **User Evidence**: “将‘项目与workspace’菜单名字改为‘workspaces’”；“右侧先划动出已有的workspace，顶部是workspace的新建按钮”；确认 NEED-004～007 和 DEC-001 的页面交互汇总。
+- **Confirmed At**: 2026-11-26 Asia/Shanghai
+
+### NEED-005：所选 Workspace 右侧详情
+
+- **Status**: confirmed
+- **Statement**: 用户从 Workspace 列表选中某个 Workspace 后，在列表右侧展示该 Workspace 的详情，形成主菜单、Workspace 列表、所选 Workspace 详情的层次。
+- **User Evidence**: “选择某个workspace后再右侧显示详细workspace内容”；确认页面交互汇总。
+- **Confirmed At**: 2026-11-26 Asia/Shanghai
+
+### NEED-006：Workspace 详情中的 Group 仓库设计画布
+
+- **Status**: confirmed
+- **Statement**: Workspace 详情提供设计器画布，支持添加多个“Group 仓库”节点。一个节点对应一个 GitLab Group；跨 Group 配置通过添加多个节点表达。节点中的仓库范围和调查分支遵守 NEED-001、NEED-002 及 CON-003。
+- **User Evidence**: “workspace详情页面，多Group 仓库如图二在设计器画布添加‘Group 仓库’”；选择“一个节点对应一个 GitLab Group，节点内选择多个仓库并逐仓配置分支”。
+- **Confirmed At**: 2026-11-26 Asia/Shanghai
+
+### NEED-007：节点右侧编辑 Group、仓库与调查分支
+
+- **Status**: confirmed
+- **Statement**: 点击画布上的“Group 仓库”节点后，在画布右侧打开该节点的编辑面板。用户在面板选择 GitLab Group、该 Group 下的多个仓库，并为每个仓库独立配置调查分支；每仓在同一 Workspace 中仍只配置一个调查分支。调查时读取最新提交、固定该次版本、记录完整 SHA 和披露读取失败的行为继续遵守 NEED-003、CON-001、CON-002。
+- **User Evidence**: “点击节点编辑仓库信息”；确认“点击节点在右侧逐仓编辑调查分支”的汇总。
 - **Confirmed At**: 2026-11-26 Asia/Shanghai
 
 ## 约束
@@ -58,6 +86,16 @@
 - **User Evidence**: 已确认“现有 GitLab 连接”边界及“当前用户有权限”的仓库范围。
 - **Confirmed At**: 2026-11-26 Asia/Shanghai
 
+## 决策
+
+### DEC-001：一个 Group 仓库节点对应一个 Group
+
+- **Status**: confirmed
+- **Decision**: 以 GitLab Group 为画布节点单位；节点内选择多个仓库并逐仓配置调查分支。多个 Group 使用多个节点。
+- **Alternatives Rejected**: 每个节点只对应一个具体 GitLab 仓库。
+- **User Evidence**: 用户选择“一个节点对应一个 GitLab Group，节点内选择多个仓库并逐仓配置分支（推荐）”，并确认页面交互汇总。
+- **Confirmed At**: 2026-11-26 Asia/Shanghai
+
 ## 不在本期范围
 
 ### OUT-001：按事故时间自动还原部署版本
@@ -76,7 +114,7 @@
 
 ## 开放问题
 
-无阻塞规格生成的开放问题。Web UI 入口布局、Git 同步及快照隔离方式、持久化结构、全部仓库均无法读取时的状态表达留待规格与设计细化；不得将其解释为允许缓存回退、虚构代码依据或扩展权限。涉及新的产品取舍时应单独澄清。
+无阻塞规格生成的开放问题。Workspace 列表、详情画布与节点编辑交互按 NEED-004～007、DEC-001 执行。具体视觉尺寸与动效、Git 同步及快照隔离方式、持久化结构、全部仓库均无法读取时的状态表达留待规格与设计细化；不得将其解释为允许缓存回退、虚构代码依据或扩展权限。涉及新的产品取舍时应单独澄清。
 
 ## 确认记录
 
@@ -86,3 +124,11 @@
 - **用户确认**: “确认上述需求及三项边界，写入 requirements.md”。
 - **已确认条目**: NEED-001、NEED-002、NEED-003、CON-001、CON-002、CON-003、OUT-001、OUT-002。
 - **阶段边界**: 仅生成 requirements.md；不生成 spec.md，不实现功能，不开启暂停中的自动日志读取或 AI 调查。
+
+### 页面交互补充确认：2026-11-26 Asia/Shanghai
+
+- **提出的汇总**: 菜单重命名为 workspaces；点击后在主菜单右侧滑出 Workspace 列表，顶部提供新建按钮；选中后在列表右侧展示详情；详情设计画布可添加多个 Group 仓库节点；一个节点对应一个 Group，点击后在画布右侧选择 Group、多仓库及各仓调查分支。
+- **用户确认**: “确认，补充到现有 requirements.md 并提交 dev”。
+- **已确认条目**: NEED-004、NEED-005、NEED-006、NEED-007、DEC-001。
+- **保持适用**: NEED-001～003、CON-001～003、OUT-001～002；本次补充不扩展仓库权限、修复或审批权限。
+- **阶段边界**: 仅补充需求文档并提交 dev，暂不修改功能代码；不生成 spec.md，不开启暂停中的自动日志读取或 AI 调查。
