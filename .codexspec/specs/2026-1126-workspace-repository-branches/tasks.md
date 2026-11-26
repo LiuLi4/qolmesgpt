@@ -16,7 +16,7 @@
   - S9 菜单名称、展开列表顶部新建、选择显示详情/切换隔离、空列表与失败状态。
   - S10 添加/编辑多个 Group 节点，逐仓分支保存并重载、失败不丢草稿、取消/关闭、异步切换防串写；脏表单轮询保留。
   - S11 浏览器真实目录/已有仓库、画布与编辑面板可操作，暂停开关不被恢复；旧调查不伪造 SHA，已有日志/卡片仍可访问。
-- [ ] T6 验证审查提交与运行。Covers: REQ-001至REQ-010,NFR-001,NFR-002; Plan: P5；依赖 T1至T5。pnpm build/lint/typecheck/test、Python SLS regression、文档覆盖检查、独立 review-code、真实浏览器，签名提交并推送 origin/dev。
+- [x] T6 验证审查提交与运行。Covers: REQ-001至REQ-010,NFR-001,NFR-002; Plan: P5；依赖 T1至T5。pnpm build/lint/typecheck/test、Python SLS regression、文档覆盖检查、独立 review-code、真实浏览器，签名提交并推送 origin/dev。
 
 ## 覆盖
 
@@ -36,3 +36,7 @@ P1→T1；P2→T2；P3→T3,T4；P4→T5；P5→T6。S1→T1，S2-S4→T2，S5-S
 | S11 | 本机 5050 浏览器验证与 API/数据库状态检查；最终结果记录在交付说明 |
 
 旧结果不补填 SHA；自动读取开关不恢复。功能检查需在最终审查通过后才将 T6 标记完成。
+
+## 交付结果
+
+实现已提交并推送至 origin/dev：`b886b1d78b3da1bba628284fd4da3860307b9370`。完整检查与真实本机运行证据见 [delivery.md](delivery.md)。
